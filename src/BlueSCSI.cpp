@@ -1,6 +1,7 @@
 /*
  * SCSI-HD Device emulator for STM32F103
  */
+#include <Arduino.h> // For Platform.IO
 #include <SdFat.h>
 
 #ifdef USE_STM32_DMA
@@ -217,6 +218,8 @@ FsFile LOG_FILE;
 
 void onFalseInit(void);
 void onBusReset(void);
+void initFileLog(void);
+void finalizeFileLog(void);
 
 /*
  * IO read.
@@ -284,6 +287,7 @@ void setup()
 {
   // PA15 / PB3 / PB4 Cannot be used
   // JTAG Because it is used for debugging.
+  // Comment out for Debugging in PlatformIO
   disableDebugPorts();
 
   // Serial initialization
