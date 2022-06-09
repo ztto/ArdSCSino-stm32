@@ -31,6 +31,9 @@
 #define SCSI_ASC_MEDIUM_NOT_PRESENT                             0x3A00
 #define SCSI_ASC_LUN_NOT_READY_MANUAL_INTERVENTION_REQUIRED     0x0403
 
+// OpenRetroSCSI Vendor Sense
+#define OPEN_RETRO_SCSI_TOO_MANY_FILES              0x0001
+
 
 // SCSI mode page codes
 #define SCSI_SENSE_MODE_VENDOR                      0x00
@@ -43,6 +46,8 @@
 #define SCSI_SENSE_MODE_CDROM                       0x0D
 #define SCSI_SENSE_MODE_CDROM_AUDIO_CONTROL         0x0E
 #define SCSI_SENSE_MODE_VENDOR_APPLE                0x30
+
+#define SCSI_SENSE_MODE_VENDOR_BLUESCSI             0x31 // Lookup range for vndr
 
 #define SCSI_SENSE_MODE_ALL                         0x3F
 
