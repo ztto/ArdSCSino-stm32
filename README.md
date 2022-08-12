@@ -14,7 +14,7 @@ X68000 のSASI対応<br>
 ・１列目：ベンダ名　　　半角8文字<br>
 ・２列目：プロダクト名　半角16文字<br>
 ・３列目：バージョン　　半角4文字<br>
-・４列目：タイプ　　　　半角1文字  <0 for STANDARD, 1 for SHARP X1turbo, 2 for NEC PC98><br>
+・４列目：タイプ　　　　半角1文字  <0 for STANDARD, 1 for SHARP X1turbo><br>
 ・５列目：WAIT時間　　　半角3文字  <SASIは、80 程度の値を入れて異常終了しない値を設定する><br>
 
 例）･は半角空白と思ってください<br>
