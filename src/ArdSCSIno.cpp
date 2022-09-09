@@ -44,7 +44,7 @@
                                 // 2: Debug information output to LOG.txt (slow)
 
 // Log File
-#define VERSION "1.1-SNAPSHOT-20220811"
+#define VERSION "1.1-SNAPSHOT-20220904"
 #define LOG_FILENAME "LOG.txt"
 
 #include "ArdSCSino.h"
@@ -65,6 +65,7 @@ FsFile LOG_FILE;
 int m_ScsiMode = 0;                      // SCSIMODE 
                                          // 0 for STANDARD
                                          // 1 for SHARP X1turbo
+                                         // 2 for NEC PC-9801-55(AND INQUIRY 'NEC')
 int m_X68SasiMsec = 0;                   // X68000 SASI or SxSI SCSI Time Wait(40ms)
 
 volatile bool m_isBusReset = false;      // Bus reset
@@ -116,6 +117,9 @@ byte (*scsi_command_table[MAX_SCSI_COMMAND])(SCSI_DEVICE *dev, const byte *cdb);
 SCSI_COMMAND_HANDLER(onAssign);
 SCSI_COMMAND_HANDLER(onSpecify);
 
+// sasi command functions(X1turbo)
+SCSI_COMMAND_HANDLER(onSpecifyX1turbo);
+
 // scsi command functions
 SCSI_COMMAND_HANDLER(onRequestSense);
 SCSI_COMMAND_HANDLER(onRead6);
@@ -133,11 +137,16 @@ SCSI_COMMAND_HANDLER(onReZeroUnit);
 SCSI_COMMAND_HANDLER(onSendDiagnostic);
 SCSI_COMMAND_HANDLER(onReadDefectData);
 
+// scsi command functions(Pc98)
+SCSI_COMMAND_HANDLER(onModeSensePc98);
+
 static void flashError(const unsigned error);
 void onBusReset(void);
 void initFileLog(int);
 void finalizeFileLog(void);
 void findDriveImages(FsFile root);
+
+void onBusResetX1turbo(void);
 
 /*
  * IO read.
@@ -200,6 +209,17 @@ void readSCSIDeviceConfig(SCSI_DEVICE *dev) {
   m_ScsiMode = String(scsiMode).toInt();
   LOG_FILE.print("SCSI MODE: ");
   LOG_FILE.println(m_ScsiMode);
+
+  if( m_ScsiMode == 1 ) {
+    scsi_command_table[SASI_SPECIFY] = onSpecifyX1turbo;
+  }
+  if( m_ScsiMode == 2 ) {
+    scsi_command_table[SCSI_MODE_SENSE6] =  onModeSensePc98;
+    scsi_command_table[SCSI_MODE_SENSE10] = onModeSensePc98;
+  }
+  if(m_ScsiMode == 1 ) {
+    attachInterrupt(RST, onBusResetX1turbo, FALLING);
+  }
 
   char x68Msec[4];
   memset(x68Msec, 0, sizeof(x68Msec));
@@ -286,7 +306,7 @@ void setup()
 {
   // PA15 / PB3 / PB4 Cannot be used
   // JTAG Because it is used for debugging.
-  disableDebugPorts();
+  enableDebugPorts();
 
   // Setup BSRR table
   for (unsigned i = 0; i <= 255; i++) {
@@ -734,48 +754,52 @@ void longjmpFromInterrupt(jmp_buf jmpb, int retval) {
  */
 void onBusReset(void)
 {
-  if(m_ScsiMode == 1) {
-  // SASI I / F for X1 turbo has RST pulse write cycle +2 clock ==
-  // I can't filter because it only activates about 1.25us
-    SCSI_DB_INPUT()
-
-    LOGN("BusReset!");
-    if (m_resetJmp) {
-      m_resetJmp = false;
-      // Jumping out of the interrupt handler, so need to clear the interupt source.
-      uint8 exti = PIN_MAP[RST].gpio_bit;
-      EXTI_BASE->PR = (1U << exti);
-      longjmpFromInterrupt(m_resetJmpBuf, 1);
-    } else {
-      m_isBusReset = true;
-    }
-  } else {
+  if(isHigh(gpio_read(RST))) {
+    delayMicroseconds(20);
     if(isHigh(gpio_read(RST))) {
-      delayMicroseconds(20);
-      if(isHigh(gpio_read(RST))) {
-//        // BUS FREE is done in the main process
-//        gpio_mode(MSG, GPIO_OUTPUT_OD);
-//        gpio_mode(CD,  GPIO_OUTPUT_OD);
-//        gpio_mode(REQ, GPIO_OUTPUT_OD);
-//        gpio_mode(IO,  GPIO_OUTPUT_OD);
-        // Should I enter DB and DBP once?
-        SCSI_DB_INPUT()
+  // BUS FREE is done in the main process
+//      gpio_mode(MSG, GPIO_OUTPUT_OD);
+//      gpio_mode(CD,  GPIO_OUTPUT_OD);
+//      gpio_mode(REQ, GPIO_OUTPUT_OD);
+//      gpio_mode(IO,  GPIO_OUTPUT_OD);
+      // Should I enter DB and DBP once?
+      SCSI_DB_INPUT()
 
-        LOGN("BusReset!");
-        if (m_resetJmp) {
-          m_resetJmp = false;
-          // Jumping out of the interrupt handler, so need to clear the interupt source.
-          uint8 exti = PIN_MAP[RST].gpio_bit;
-          EXTI_BASE->PR = (1U << exti);
-          longjmpFromInterrupt(m_resetJmpBuf, 1);
-        } else {
-          m_isBusReset = true;
-        }
+      LOGN("BusReset!");
+      if (m_resetJmp) {
+        m_resetJmp = false;
+        // Jumping out of the interrupt handler, so need to clear the interupt source.
+        uint8 exti = PIN_MAP[RST].gpio_bit;
+        EXTI_BASE->PR = (1U << exti);
+        longjmpFromInterrupt(m_resetJmpBuf, 1);
+      } else {
+        m_isBusReset = true;
       }
     }
   }
 }
-    
+
+/*
+ * Bus reset interrupt.
+ * X1turbo Mode
+ */
+void onBusResetX1turbo(void) {
+  // SASI I / F for X1 turbo has RST pulse write cycle +2 clock ==
+  // I can't filter because it only activates about 1.25us
+  SCSI_DB_INPUT()
+
+  LOGN("BusReset!");
+  if (m_resetJmp) {
+    m_resetJmp = false;
+    // Jumping out of the interrupt handler, so need to clear the interupt source.
+    uint8 exti = PIN_MAP[RST].gpio_bit;
+    EXTI_BASE->PR = (1U << exti);
+    longjmpFromInterrupt(m_resetJmpBuf, 1);
+  } else {
+    m_isBusReset = true;
+  }
+}
+
 /*
  * Enable the reset longjmp, and check if reset fired while it was disabled.
  */
@@ -1214,39 +1238,45 @@ static byte onAssign(SCSI_DEVICE *dev, const byte *cdb)
 /*
  * SPECIFY Command(SASI) processing.
  */
-
 static byte onSpecify(SCSI_DEVICE *dev, const byte *cdb)
 {
   LOGN("SPECIFY");
-    if(m_ScsiMode == 1) {
-    DTC510_CMD_C2_PARAM DriveParameter;
-    uint16_t maxCylinder;
-    uint16_t numLAD;
-    //uint32_t stepPulseUsec;
-    int StepPeriodMsec;
+  byte a[11];
+  memset(a, 0, sizeof(a));
+  readDataPhase(10, a);
+  return SCSI_STATUS_GOOD;
+}
 
-    // receive paramter
-    writeDataPhase(sizeof(DriveParameter),(byte *)(&DriveParameter));
+/*
+ * SPECIFY Command(SASI) processing.
+ * X1turbo Mode
+ */
+static byte onSpecifyX1turbo(SCSI_DEVICE *dev, const byte *cdb)
+{
+  LOGN("SPECIFY");
+  DTC510_CMD_C2_PARAM DriveParameter;
+  uint16_t maxCylinder;
+  uint16_t numLAD;
+  //uint32_t stepPulseUsec;
+  int StepPeriodMsec;
 
-    maxCylinder =
-      (((uint16_t)DriveParameter.HighCylinderAddressByte)<<8) |
-      (DriveParameter.LowCylinderAddressByte);
-    numLAD = maxCylinder * (DriveParameter.MaximumHeadAdress+1);
-    //stepPulseUsec  = calcStepPulseUsec(DriveParameter.StepPlusWidth);
-    StepPeriodMsec = DriveParameter.StepPeriod*50;
-    logStrHex(" StepPlusWidth      : ",DriveParameter.StepPlusWidth);
-    logStrHex(" StepPeriod         : ",DriveParameter.StepPeriod   );
-    logStrHex(" StepMode           : ",DriveParameter.StepMode     );
-    logStrHex(" MaximumHeadAdress  : ",DriveParameter.MaximumHeadAdress);
-    logStrHex(" CylinderAddress    : ",maxCylinder);
-    logStrHex(" ReduceWrietCurrent : ",DriveParameter.ReduceWrietCurrent);
-    logStrHex(" DriveType/SeekCompleteOption : ",DriveParameter.DriveType_SeekCompleteOption);
-    logStrHex(" Maximum LAD        : ",numLAD-1);
-  } else {
-    byte a[11];
-    memset(a, 0, sizeof(a));
-    readDataPhase(10, a);
-  }
+  // receive paramter
+  writeDataPhase(sizeof(DriveParameter),(byte *)(&DriveParameter));
+
+  maxCylinder =
+    (((uint16_t)DriveParameter.HighCylinderAddressByte)<<8) |
+    (DriveParameter.LowCylinderAddressByte);
+  numLAD = maxCylinder * (DriveParameter.MaximumHeadAdress+1);
+  //stepPulseUsec  = calcStepPulseUsec(DriveParameter.StepPlusWidth);
+  StepPeriodMsec = DriveParameter.StepPeriod*50;
+  logStrHex(" StepPlusWidth      : ",DriveParameter.StepPlusWidth);
+  logStrHex(" StepPeriod         : ",DriveParameter.StepPeriod   );
+  logStrHex(" StepMode           : ",DriveParameter.StepMode     );
+  logStrHex(" MaximumHeadAdress  : ",DriveParameter.MaximumHeadAdress);
+  logStrHex(" CylinderAddress    : ",maxCylinder);
+  logStrHex(" ReduceWrietCurrent : ",DriveParameter.ReduceWrietCurrent);
+  logStrHex(" DriveType/SeekCompleteOption : ",DriveParameter.DriveType_SeekCompleteOption);
+  logStrHex(" Maximum LAD        : ",numLAD-1);
   return SCSI_STATUS_GOOD;
 }
 
@@ -1340,6 +1370,7 @@ byte onModeSense(SCSI_DEVICE *dev, const byte *cdb)
     }
     a += 0x18;
     if(pageCode != SCSI_SENSE_MODE_ALL) break;
+
   case SCSI_SENSE_MODE_FLEXABLE_GEOMETRY:
     m_buf[a + 0] = SCSI_SENSE_MODE_FLEXABLE_GEOMETRY;
     m_buf[a + 1] = 0x1E;  // Page length
@@ -1353,6 +1384,7 @@ byte onModeSense(SCSI_DEVICE *dev, const byte *cdb)
     }
     a += 0x20;
     if(pageCode != SCSI_SENSE_MODE_ALL) break;
+
   case SCSI_SENSE_MODE_CACHING:
     m_buf[a + 0] = SCSI_SENSE_MODE_CACHING;
     m_buf[a + 1] = 0x0A;  // Page length
@@ -1361,6 +1393,7 @@ byte onModeSense(SCSI_DEVICE *dev, const byte *cdb)
     }
     a += 0x08;
     if(pageCode != SCSI_SENSE_MODE_ALL) break;
+
   case SCSI_SENSE_MODE_VENDOR_APPLE:
     {
       const byte page30[0x14] = {0x41, 0x50, 0x50, 0x4C, 0x45, 0x20, 0x43, 0x4F, 0x4D, 0x50, 0x55, 0x54, 0x45, 0x52, 0x2C, 0x20, 0x49, 0x4E, 0x43, 0x20};
@@ -1393,7 +1426,85 @@ byte onModeSense(SCSI_DEVICE *dev, const byte *cdb)
   writeDataPhase(cdb[4] < a ? cdb[4] : a, m_buf);
   return SCSI_STATUS_GOOD;
 }
-    
+
+/*
+ * MODE SENSE command processing.
+ * Pc98 Mode
+ */
+byte onModeSensePc98(SCSI_DEVICE *dev, const byte *cdb)
+{
+  LOGN("MODE SENSE");
+  memset(m_buf, 0, sizeof(m_buf));
+  int pageCode = cdb[2] & 0x3F;
+  int pageControl = cdb[2] >> 6;
+  int a = 4;
+  byte dbd = cdb[1] & 0x08;
+  int size = dev->m_fileSize;
+  int cylinders = (int)(size >> 9);
+  cylinders >>= 3;
+  cylinders /= 25;
+  int sectorsize = 512;
+  int sectors = 25;
+  int heads = 8;
+  // Sector size
+  int disksize = 0;
+  for(disksize = 16; disksize > 0; --(disksize)) {
+  if ((1 << disksize) == sectorsize)
+      break;
+  }
+  // Number of blocks
+  uint32_t diskblocks = (uint32_t)(size >> disksize);
+  if(dbd == 0) {
+    byte c[8] = {
+      0,//Density code
+      dev->m_blockcount >> 16,
+      dev->m_blockcount >> 8,
+      dev->m_blockcount,
+      0, //Reserve
+      dev->m_blocksize >> 16,
+      dev->m_blocksize >> 8,
+      dev->m_blocksize,
+    };
+    memcpy(&m_buf[a], c, 8);
+    a += 8;
+    m_buf[3] = 0x08;
+  }
+  switch(pageCode) {
+    case SCSI_SENSE_MODE_ALL:
+      m_buf[a + 0] = 0x01;
+      m_buf[a + 1] = 0x06;
+      a += 8;
+    case SCSI_SENSE_MODE_FORMAT_DEVICE:  //Drive parameters
+      m_buf[a + 0] = 0x80 | 0x03; // Page code
+      m_buf[a + 1] = 0x16; // Page length
+      m_buf[a + 2] = (byte)(heads >> 8);// number of sectors / track
+      m_buf[a + 3] = (byte)(heads);// number of sectors / track
+      m_buf[a + 10] = (byte)(sectors >> 8);// number of sectors / track
+      m_buf[a + 11] = (byte)(sectors);// number of sectors / track
+      m_buf[a + 12] = (byte)(dev->m_blocksize >> 8);
+      m_buf[a + 13] = (byte)dev->m_blocksize;
+      a += 24;
+      if(pageCode != SCSI_SENSE_MODE_ALL)break;
+
+    case SCSI_SENSE_MODE_DISK_GEOMETRY:  //Drive parameters
+      LOGN("AddDrive");
+      m_buf[a + 0] = SCSI_SENSE_MODE_DISK_GEOMETRY; //Page code
+      m_buf[a + 1] = 0x12; // Page length
+      m_buf[a + 2] = (byte)(cylinders >> 16); // Cylinders
+      m_buf[a + 3] = (byte)(cylinders >> 8);
+      m_buf[a + 4] = (byte)cylinders;
+      m_buf[a + 5] = heads;   // Number of heads
+      a += 20;
+      if(pageCode != SCSI_SENSE_MODE_ALL) break;
+
+    default:
+      break;
+  }
+  m_buf[0] = a - 1;
+  writeDataPhase(cdb[4] < a ? cdb[4] : a, m_buf);
+  return SCSI_STATUS_GOOD;
+}
+
 byte onModeSelect(SCSI_DEVICE *dev, const byte *cdb)
 {
   unsigned length = 0;
