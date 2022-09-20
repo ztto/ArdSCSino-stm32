@@ -1836,27 +1836,28 @@ byte onListFiles(SCSI_DEVICE *dev, const byte *cdb) {
   // FileEntry names[512];
   char names[512] ={0};
   int ENTRY_SIZE = 40;
-  char name[MAX_FILE_PATH + 1];
+  char name[MAX_MAC_PATH + 1];
   dir.open("/shared");
   dir.rewindDirectory();
   uint8_t index = 0;
   while (file.openNext(&dir, O_RDONLY)) {
     uint8_t isDir = file.isDirectory() ? 0x00 : 0x01;
-    file.getName(name, MAX_FILE_PATH + 1);
-    u_int32_t size = file.fileSize();
-    file.close();
+    file.getName(name, MAX_MAC_PATH + 1);
+    uint64_t size = file.fileSize();
+
     byte file_entry[ENTRY_SIZE] = {0};
     file_entry[0] = index;
     file_entry[1] = isDir;
     int c = 0;
-    for(int i = 2; i < (MAX_FILE_PATH + 1 + 2); i++) {   // bytes 2 - 34
+    for(int i = 2; i < (MAX_MAC_PATH + 1 + 2); i++) {   // bytes 2 - 34
       file_entry[i] = name[c++];
     }
-    file_entry[35] = (size >> 32) & 0xff;
+    file_entry[35] = 0; //(size >> 32) & 0xff;
     file_entry[36] = (size >> 24) & 0xff; 
     file_entry[37] = (size >> 16) & 0xff; 
     file_entry[38] = (size >> 8) & 0xff;
     file_entry[39] = (size) & 0xff;
+    file.close();
     memcpy(&(names[ENTRY_SIZE * index]), file_entry, ENTRY_SIZE);
     index = index + 1;
   }
@@ -1933,6 +1934,7 @@ byte onGetFile(SCSI_DEVICE *dev, const byte *cdb) {
   }
   
   uint32_t file_total = file.size();
+
   byte buf[512] = {0};
   file.seekSet(offset * 512);
   int read_bytes = file.read(buf, 512);
@@ -1950,10 +1952,10 @@ byte onGetFile(SCSI_DEVICE *dev, const byte *cdb) {
 File receveFile;
 byte onSendFilePrep(SCSI_DEVICE *dev, const byte *cdb)
 {
-  char file_name[33];
+  char file_name[MAX_MAC_PATH+1];
 
-  memset(file_name, '\0', 33);
-  readDataPhase(33, m_buf);
+  memset(file_name, '\0', MAX_MAC_PATH+1);
+  readDataPhase(MAX_MAC_PATH+1, m_buf);
   strcpy(file_name, (char *)m_buf);
 
   SD.chdir("/shared");
