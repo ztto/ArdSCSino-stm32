@@ -1833,8 +1833,8 @@ byte onModeSense(SCSI_DEVICE *dev, const byte *cdb)
 byte onListFiles(SCSI_DEVICE *dev, const byte *cdb) {
   File dir;
   File file;
-  // FileEntry names[512];
-  char names[512] ={0};
+
+  memset(m_buf, 0, 4096);
   int ENTRY_SIZE = 40;
   char name[MAX_MAC_PATH + 1];
   dir.open("/shared");
@@ -1861,11 +1861,11 @@ byte onListFiles(SCSI_DEVICE *dev, const byte *cdb) {
     file_entry[37] = (size >> 16) & 0xff; 
     file_entry[38] = (size >> 8) & 0xff;
     file_entry[39] = (size) & 0xff;
-    memcpy(&(names[ENTRY_SIZE * index]), file_entry, ENTRY_SIZE);
+    memcpy(&(m_buf[ENTRY_SIZE * index]), file_entry, ENTRY_SIZE);
     index = index + 1;
   }
   dir.close();
-  writeDataPhase(512, (const byte *)names);
+  writeDataPhase(4096, (const byte *)m_buf);
   return SCSI_STATUS_GOOD;
 }
 
@@ -1894,7 +1894,7 @@ byte onCountFiles(SCSI_DEVICE *dev, const byte *cdb) {
   dir.close();
   LOG_FILE.println(index);
   LOG_FILE.sync();
-  if(index > 255) {
+  if(index > 100) {
     dev->m_senseKey = SCSI_SENSE_ILLEGAL_REQUEST;
     dev->m_additional_sense_code = OPEN_RETRO_SCSI_TOO_MANY_FILES;
     return SCSI_STATUS_CHECK_CONDITION;
