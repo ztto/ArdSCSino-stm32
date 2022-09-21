@@ -1840,10 +1840,14 @@ byte onListFiles(SCSI_DEVICE *dev, const byte *cdb) {
   dir.open("/shared");
   dir.rewindDirectory();
   uint8_t index = 0;
-  while (file.openNext(&dir, O_RDONLY)) {
+  while (file.openNext(&dir, O_RDONLY))
+  {
     uint8_t isDir = file.isDirectory() ? 0x00 : 0x01;
     file.getName(name, MAX_MAC_PATH + 1);
     uint64_t size = file.fileSize();
+    file.close();
+    if(name[0] == '.')
+      continue;
 
     byte file_entry[ENTRY_SIZE] = {0};
     file_entry[0] = index;
@@ -1857,7 +1861,6 @@ byte onListFiles(SCSI_DEVICE *dev, const byte *cdb) {
     file_entry[37] = (size >> 16) & 0xff; 
     file_entry[38] = (size >> 8) & 0xff;
     file_entry[39] = (size) & 0xff;
-    file.close();
     memcpy(&(names[ENTRY_SIZE * index]), file_entry, ENTRY_SIZE);
     index = index + 1;
   }
@@ -1870,16 +1873,23 @@ byte onListFiles(SCSI_DEVICE *dev, const byte *cdb) {
 byte onCountFiles(SCSI_DEVICE *dev, const byte *cdb) {
   File dir;
   File file;
+  char name[MAX_MAC_PATH + 1];
+
   dir.open("/shared");
   dir.rewindDirectory();
   uint16_t index = 0;
-  while (file.openNext(&dir, O_RDONLY)) {
-    if(file.getError() > 0) {
+  while (file.openNext(&dir, O_RDONLY))
+  {
+    if(file.getError() > 0)
+    {
       file.close();
       break;
     }
+    file.getName(name, MAX_MAC_PATH + 1);
     file.close();
-    index = index + 1;
+    // only count valid files.
+    if(name[0] != '.')
+      index = index + 1;
   }
   dir.close();
   LOG_FILE.println(index);
@@ -1897,19 +1907,30 @@ File get_file_from_index(uint8_t index)
 {
   File dir;
   FsFile file_test;
+  char name[MAX_MAC_PATH + 1];
+
   dir.open("/shared");
   dir.rewindDirectory(); // Back to the top
   int count = 0;
-  while (file_test.openNext(&dir, O_RDONLY)) {
+  while (file_test.openNext(&dir, O_RDONLY))
+  {
     // If error there is no next file to open.
     if(file_test.getError() > 0) {
       file_test.close();
       break;
     }
+    file_test.getName(name, MAX_MAC_PATH + 1);
+
+    if(name[0] == '.')
+      continue;
     if (count == index)
     {
       dir.close();
       return file_test;
+    }
+    else
+    {
+      file_test.close();
     }
     count++;
   }
