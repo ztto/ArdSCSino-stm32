@@ -1834,7 +1834,7 @@ byte onListFiles(SCSI_DEVICE *dev, const byte *cdb) {
   File dir;
   File file;
 
-  memset(m_buf, 0, 4096);
+  memset(m_buf, 0, MAC_BLK_SIZE);
   int ENTRY_SIZE = 40;
   char name[MAX_MAC_PATH + 1];
   dir.open("/shared");
@@ -1848,7 +1848,6 @@ byte onListFiles(SCSI_DEVICE *dev, const byte *cdb) {
     file.close();
     if(name[0] == '.')
       continue;
-
     byte file_entry[ENTRY_SIZE] = {0};
     file_entry[0] = index;
     file_entry[1] = isDir;
@@ -1865,7 +1864,7 @@ byte onListFiles(SCSI_DEVICE *dev, const byte *cdb) {
     index = index + 1;
   }
   dir.close();
-  writeDataPhase(4096, (const byte *)m_buf);
+  writeDataPhase(MAC_BLK_SIZE, (const byte *)m_buf);
   return SCSI_STATUS_GOOD;
 }
 
@@ -1892,8 +1891,7 @@ byte onCountFiles(SCSI_DEVICE *dev, const byte *cdb) {
       index = index + 1;
   }
   dir.close();
-  LOG_FILE.println(index);
-  LOG_FILE.sync();
+
   if(index > 100) {
     dev->m_senseKey = SCSI_SENSE_ILLEGAL_REQUEST;
     dev->m_additional_sense_code = OPEN_RETRO_SCSI_TOO_MANY_FILES;
@@ -1955,12 +1953,11 @@ byte onGetFile(SCSI_DEVICE *dev, const byte *cdb) {
   }
   
   uint32_t file_total = file.size();
-
-  byte buf[512] = {0};
-  file.seekSet(offset * 512);
-  int read_bytes = file.read(buf, 512);
-  writeDataPhase(read_bytes, buf);
-  if(offset * 512 >= file_total) // transfer done, close.
+  memset(m_buf, 0, MAC_BLK_SIZE);
+  file.seekSet(offset * MAC_BLK_SIZE);
+  int read_bytes = file.read(m_buf, MAC_BLK_SIZE);
+  writeDataPhase(read_bytes, m_buf);
+  if(offset * MAC_BLK_SIZE >= file_total) // transfer done, close.
   {
     file.close();
   }
