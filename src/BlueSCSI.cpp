@@ -1182,8 +1182,7 @@ void loop()
 
   LOGHEX(cmd[0]);
   // Command length selection, reception
-  static const int cmd_class_len[8]={6,10,10,6,6,12,6,6};
-  len = cmd_class_len[cmd[0] >> 5];
+  len = cdb_len_lookup[cmd[0]];
   cmd[1] = readHandshake(); LOG(":");LOGHEX(cmd[1]);
   cmd[2] = readHandshake(); LOG(":");LOGHEX(cmd[2]);
   cmd[3] = readHandshake(); LOG(":");LOGHEX(cmd[3]);
