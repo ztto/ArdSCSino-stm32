@@ -231,6 +231,10 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
     LOG_FILE.println(" - file is 0 bytes, can not use.");
     goto failed;
   }
+  if(!dev->m_file->isContiguous())
+  {
+    LOG_FILE.println(" - file is fragmented, see https://github.com/erichelgeson/BlueSCSI/wiki/Image-File-Fragmentation");
+  }
 
   if(dev->m_type == SCSI_DEVICE_OPTICAL) {
     LOG_FILE.print(" CDROM");
