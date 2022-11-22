@@ -450,20 +450,21 @@ void setup()
   //Occurs when the RST pin state changes from HIGH to LOW
   //attachInterrupt(RST, onBusReset, FALLING);
 
-  // Try Full and half clock speeds.
+  // Try different clock speeds till we find one that is stable.
   LED_ON();
-  int mhz = 0;
-  if (SD.begin(SdSpiConfig(PA4, DEDICATED_SPI, SD_SCK_MHZ(50), &SPI)))
-  {
-    mhz = 50;
-  }
-  else if (SD.begin(SdSpiConfig(PA4, DEDICATED_SPI, SD_SCK_MHZ(25), &SPI)))
-  {
-    mhz = 25;
+  int mhz = 50;
+  bool sd_ready = false;
+  while (mhz > 25 && !sd_ready) {
+    if(SD.begin(SdSpiConfig(PA4, DEDICATED_SPI, SD_SCK_MHZ(mhz), &SPI))) {
+      sd_ready = true;
+    }
+    else {
+      mhz--;
+    }
   }
   LED_OFF();
 
-  if(mhz == 0) {
+  if(!sd_ready) {
 #if DEBUG > 0
     Serial.println("SD initialization failed!");
 #endif
@@ -669,9 +670,6 @@ void initFileLog(int success_mhz) {
   LOG_FILE.print("SPI speed: ");
   LOG_FILE.print(success_mhz);
   LOG_FILE.println("Mhz");
-  if(success_mhz == 25) {
-    LOG_FILE.println("SPI running at half speed - read https://github.com/erichelgeson/BlueSCSI/wiki/Slow-SPI");
-  }
   LOG_FILE.print("SdFat Max FileName Length: ");
   LOG_FILE.println(MAX_FILE_PATH);
   LOG_FILE.println("Initialized SD Card - let's go!");
