@@ -77,6 +77,10 @@ byte          m_msb[256];                // Command storage bytes
 SCSI_DEVICE scsi_device_list[NUM_SCSIID][NUM_SCSILUN]; // Maximum number
 SCSI_INQUIRY_DATA default_hdd, default_optical;
 
+// Enables SCSI IDs to be representing as LUNs on SCSI ID 0 
+// This supports a specific case for the Atari MegaSTE internal SCSI adapter
+bool megaste_mode = false;
+
 // function table
 byte (*scsi_command_table[MAX_SCSI_COMMAND])(SCSI_DEVICE *dev, const byte *cdb);
 
@@ -318,6 +322,15 @@ void setup()
     scsi_command_table[i] = onUnimplemented;
   }
 
+  // zero all SCSI device structs
+  for(unsigned id = 0; id < NUM_SCSIID; id++)
+  {
+    for(unsigned lun = 0; lun < NUM_SCSILUN; lun++)
+    {
+      memset(&scsi_device_list[id][lun], 0, sizeof(SCSI_DEVICE));
+    }
+  }
+
   // SCSI commands that just need to return ok
   scsi_command_table[SCSI_FORMAT_UNIT4] = onNOP;
   scsi_command_table[SCSI_FORMAT_UNIT6] = onNOP;
@@ -476,6 +489,12 @@ void setup()
   //HD image file open
   scsi_id_mask = 0x00;
 
+  // Look for this file to enable MSTE_MODE
+  if(SD.exists("MSTE_MODE")) {
+    LOG_FILE.println("MSTE_MODE - IDs treated as LUNs");
+    megaste_mode = true;
+  }
+
   // Iterate over the root path in the SD card looking for candidate image files.
   FsFile root;
 
@@ -539,6 +558,7 @@ void findDriveImages(FsFile root) {
       file_test.close();
       break;
     }
+
     // Valid file, open for reading/writing.
     file = new FsFile(SD.open(name, O_RDWR));
     if(file && file->isFile()) {
@@ -1196,7 +1216,21 @@ void loop()
   // if it wasn't set in the IDENTIFY then grab it from the CDB
   if(m_lun > MAX_SCSILUN)
   {
-      m_lun = (cmd[1] & 0xe0) >> 5;
+    m_lun = (cmd[1] & 0xe0) >> 5;
+    if(megaste_mode)
+    {
+      // if this mode is enabled we are going to substitute all SCSI IDs as LUNs on ID0
+      // this is because the MegaSTE internal adapter only supports ID0. This lets multiple 
+      // devices still be used
+
+      LOG(" MSTE MODE ID:"); LOG(m_id); LOG(" LUN:"); LOG(m_lun);
+      if(scsi_device_list[m_lun][0].m_fileSize)
+      {
+        m_id = m_lun;
+        m_lun = 0;
+        LOG(" => ID:"); LOG(m_id); LOG(" LUN:"); LOG(m_lun); LOG(" ");
+      }
+    }
   }
 
   LOG(":ID ");
