@@ -488,6 +488,12 @@ void setup()
   //HD image file open
   scsi_id_mask = 0x00;
 
+  // Look for this file to enable MSTE_MODE
+  if(SD.exists("MSTE_MODE")) {
+    LOG_FILE.println("MSTE_MODE - IDs treated as LUNs");
+    megaste_mode = true;
+  }
+
   // Iterate over the root path in the SD card looking for candidate image files.
   FsFile root;
 
@@ -550,13 +556,6 @@ void findDriveImages(FsFile root) {
     if(file_test.getError() > 0) {
       file_test.close();
       break;
-    }
-
-    // Look for this file to enable MSTE_MODE
-    // hacky until a better ini file parsing exists
-    if(strncmp(name, "MSTE_MODE", 9) == 0) {
-      megaste_mode = true;
-      continue;
     }
 
     // Valid file, open for reading/writing.
