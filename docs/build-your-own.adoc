@@ -27,6 +27,8 @@ https://www.mouser.com/ProjectManager/ProjectDetail.aspx?AccessID=c5cc83feff
 
 Buy from a place where returns are easy. Ensure the photo in the listing shows a chip that says STM32 on it.
 
+The BluePill must be a STM32F103**C8T6** - a C6T6 will not work. Check the listings closely.
+
 https://www.amazon.com/s?k=stm32f103c8t6
 
 https://www.ebay.com/sch/i.html?_nkw=stm32f103c8t6
