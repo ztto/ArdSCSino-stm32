@@ -52,7 +52,7 @@
 #include "scsi_sense.h"
 #include "scsi_status.h"
 #include "scsi_mode.h"
-#include <minIni.h>
+#include "minIni.h"
 
 #ifdef USE_STM32_DMA
 #warning "warning USE_STM32_DMA"
