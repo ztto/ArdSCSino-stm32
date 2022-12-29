@@ -74,7 +74,7 @@ SCSI_INQUIRY_DATA default_hdd, default_optical;
 
 // Enables SCSI IDs to be representing as LUNs on SCSI ID 0 
 // This supports a specific case for the Atari MegaSTE internal SCSI adapter
-bool megaste_mode = false;
+bool ids_as_luns = false;
 
 // function table
 byte (*scsi_command_table[MAX_SCSI_COMMAND])(SCSI_DEVICE *dev, const byte *cdb);
@@ -518,10 +518,10 @@ void setup()
   //HD image file open
   scsi_id_mask = 0x00;
 
-  if(ini_getl("SCSI", "megastemode", 0, BLUESCSI_INI))
+  if(ini_getl("SCSI", "MapLunsToIDs", 0, BLUESCSI_INI))
   {
-    LOG_FILE.println("MSTE_MODE - IDs treated as LUNs");
-    megaste_mode = true;
+    LOG_FILE.println("IDs treated as LUNs for ID0");
+    ids_as_luns = true;
   }
 
   if(SD.exists("scsi-config.txt")) {
@@ -1229,7 +1229,7 @@ void loop()
   if(m_lun > MAX_SCSILUN)
   {
     m_lun = (cmd[1] & 0xe0) >> 5;
-    if(megaste_mode)
+    if(ids_as_luns)
     {
       // if this mode is enabled we are going to substitute all SCSI IDs as LUNs on ID0
       // this is because the MegaSTE internal adapter only supports ID0. This lets multiple 
