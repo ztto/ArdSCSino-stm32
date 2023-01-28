@@ -871,6 +871,39 @@ inline void writeHandshake(byte d)
   while( SCSI_IN(vACK));
 }
 
+inline void writeHandshakeLoop(int len, const byte* srcptr)
+{
+  LOG(" DI ");
+  SCSI_PHASE_CHANGE(SCSI_PHASE_DATAIN);
+  // Bus settle delay 400ns. Following code was measured at 800ns before REQ asserted. STM32F103.
+#ifdef XCVR
+  TRANSCEIVER_IO_SET(vTR_DBP,TR_OUTPUT)
+#endif
+  SCSI_DB_OUTPUT()
+#define REQ_ON() (port_b->BRR = req_bit);
+#define FETCH_BSRR_DB() (bsrr_val = bsrr_tbl[*srcptr++])
+#define REQ_OFF_DB_SET(BSRR_VAL) port_b->BSRR = BSRR_VAL;
+#define WAIT_ACK_ACTIVE()   while((*port_a_idr>>(vACK&15)&1))
+#define WAIT_ACK_INACTIVE() while(!(*port_a_idr>>(vACK&15)&1))
+
+  register const uint32_t *bsrr_tbl = db_bsrr;      // Table to convert to BSRR
+  register uint32_t bsrr_val;                       // BSRR value to output (DB, DBP, REQ = ACTIVE)
+  register uint32_t req_bit = BITMASK(vREQ);
+  register gpio_reg_map *port_b = PBREG;
+  register volatile uint32_t *port_a_idr = &(GPIOA->regs->IDR);
+
+  // Start the first bus cycle.  
+  do{    
+    FETCH_BSRR_DB();
+    REQ_OFF_DB_SET(bsrr_val);
+    WAIT_ACK_INACTIVE();
+    REQ_ON();
+    WAIT_ACK_ACTIVE();
+  }while(--len);
+  GPIOB->regs->BSRR = DBP(0xff);  // DB=0xFF , SCSI_OUT(vREQ,inactive)
+  WAIT_ACK_INACTIVE();
+}
+
 #pragma GCC push_options
 #pragma GCC optimize ("-Os")
 /*
@@ -1370,7 +1403,7 @@ static byte onNOP(SCSI_DEVICE *dev, const byte *cdb)
  */
 byte onInquiry(SCSI_DEVICE *dev, const byte *cdb)
 {
-  writeDataPhase(cdb[4] < 47 ? cdb[4] : 47, dev->inquiry_block.raw);
+  writeHandshakeLoop(cdb[4] < 47 ? cdb[4] : 47, dev->inquiry_block.raw);
   return SCSI_STATUS_GOOD;
 }
 
