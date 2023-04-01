@@ -52,6 +52,7 @@
 #include "scsi_sense.h"
 #include "scsi_status.h"
 #include "scsi_mode.h"
+#include "minIni.h"
 
 #ifdef USE_STM32_DMA
 #warning "warning USE_STM32_DMA"
@@ -64,22 +65,16 @@ FsFile LOG_FILE;
 volatile bool m_isBusReset = false;   // Bus reset
 volatile bool m_resetJmp = false;     // Call longjmp on reset
 jmp_buf       m_resetJmpBuf;
-
 byte          scsi_id_mask;              // Mask list of responding SCSI IDs
-byte          m_id;                      // Currently responding SCSI-ID
-byte          m_lun;                     // Logical unit number currently responding
-byte          m_sts;                     // Status byte
-byte          m_msg;                     // Message bytes
 byte          m_buf[MAX_BLOCKSIZE];      // General purpose buffer
 byte          m_scsi_buf[SCSI_BUF_SIZE]; // Buffer for SCSI READ/WRITE Buffer
-unsigned      m_scsi_buf_size = 0;
-byte          m_msb[256];                // Command storage bytes
+
 SCSI_DEVICE scsi_device_list[NUM_SCSIID][NUM_SCSILUN]; // Maximum number
 SCSI_INQUIRY_DATA default_hdd, default_optical;
 
 // Enables SCSI IDs to be representing as LUNs on SCSI ID 0 
 // This supports a specific case for the Atari MegaSTE internal SCSI adapter
-bool megaste_mode = false;
+bool ids_as_luns = false;
 
 // function table
 byte (*scsi_command_table[MAX_SCSI_COMMAND])(SCSI_DEVICE *dev, const byte *cdb);
@@ -112,7 +107,7 @@ static void LBAtoMSF(const uint32_t lba, byte *msf);
 
 static void flashError(const unsigned error);
 void onBusReset(void);
-void initFileLog(int);
+void initFileLog(void);
 void finalizeFileLog(void);
 void findDriveImages(FsFile root);
 
@@ -132,67 +127,106 @@ inline byte readIO(void)
   return bret;
 }
 
-// If config file exists, read the first three lines and copy the contents.
-// File must be well formed or you will get junk in the SCSI Vendor fields.
-void readSCSIDeviceConfig(SCSI_DEVICE *dev) {
-  FsFile config_file = SD.open("scsi-config.txt", O_RDONLY);
-  if (!config_file.isOpen()) {
+// Read config file for per device settings
+void readSCSIDeviceConfig(uint8_t scsi_id, SCSI_DEVICE *dev) {
+  SCSI_INQUIRY_DATA *iq = &dev->inquiry_block;
+  char section[6] = {'S', 'C', 'S', 'I', 0, 0};
+  FsFile config_file;
+  char *buf = (char *)&m_scsi_buf;
+
+  // check for bluescsi.ini
+  if(!SD.exists(BLUESCSI_INI)) {
     return;
   }
-  SCSI_INQUIRY_DATA *iq = dev->inquiry_block;
 
-  char vendor[9];
-  memset(vendor, 0, sizeof(vendor));
-  config_file.readBytes(vendor, sizeof(vendor));
-  LOG_FILE.print("SCSI VENDOR: ");
-  LOG_FILE.println(vendor);
-  memcpy(&iq->vendor, vendor, 8);
+  // create section name from id
+  section[4] = INT_TO_CHAR(scsi_id);
 
-  char product[17];
-  memset(product, 0, sizeof(product));
-  config_file.readBytes(product, sizeof(product));
-  LOG_FILE.print("SCSI PRODUCT: ");
-  LOG_FILE.println(product);
-  memcpy(&iq->product, product, 16);
+  switch(ini_getl(section, "type", 99, BLUESCSI_INI))
+  {
+    case 0:
+      dev->m_type = SCSI_DEVICE_HDD;
+      memcpy(iq, &default_hdd, sizeof(default_hdd));
+      LOG_FILE.println("Forced HDD");
+      break;
 
-  char version[5];
-  memset(version, 0, sizeof(version));
-  config_file.readBytes(version, sizeof(version));
-  LOG_FILE.print("SCSI VERSION: ");
-  LOG_FILE.println(version);
-  memcpy(&iq->revision, version, 4);
-  config_file.close();
+    case 2:
+      dev->m_type = SCSI_DEVICE_OPTICAL;
+      memcpy(iq, &default_optical, sizeof(default_optical));
+      LOG_FILE.println("Forced Optical");
+      break;
+
+    case 99:
+      // default, do nothing at all
+      break;
+
+    default:
+      LOG_FILE.println("Unsupported override type");
+  }
+
+  if(ini_gets(section, "vendor", NULL, buf, SCSI_BUF_SIZE, BLUESCSI_INI)) {
+    memcpy(iq->vendor, buf, SCSI_VENDOR_LENGTH);
+    LOG_FILE.print("vendor:");
+    LOG_FILE.println(buf);
+  }
+  
+  if(ini_gets(section, "product", NULL, buf, SCSI_BUF_SIZE, BLUESCSI_INI)) {
+    memcpy(iq->product, buf, SCSI_PRODUCT_LENGTH);
+    LOG_FILE.print("product:");
+    LOG_FILE.println(buf);
+  }
+
+  if(ini_gets(section, "revision", NULL, buf, SCSI_BUF_SIZE, BLUESCSI_INI)) {
+    memcpy(iq->revision, buf, SCSI_REVISION_LENGTH);
+    LOG_FILE.print("revision:");
+    LOG_FILE.println(buf);
+  }
 }
 
 // read SD information and print to logfile
-void readSDCardInfo()
+void readSDCardInfo(int success_mhz)
 {
   cid_t sd_cid;
 
+  LOG_FILE.println("SDCard Info:");
+  LOG_FILE.print(" Format:");
+  switch(SD.vol()->fatType()) {
+    case FAT_TYPE_EXFAT:
+    LOG_FILE.println("exFAT");
+    break;
+    default:
+    LOG_FILE.print("FAT32/16/12 - exFAT may improve performance");
+  }
+  LOG_FILE.print("SPI speed: ");
+  LOG_FILE.print(success_mhz);
+  LOG_FILE.println("Mhz");
+  LOG_FILE.print(" Max Filename Length:");
+  LOG_FILE.println(MAX_FILE_PATH);
+
   if(SD.card()->readCID(&sd_cid))
   {
-    LOG_FILE.print("Sd MID:");
+    LOG_FILE.print(" MID:");
     LOG_FILE.print(sd_cid.mid, 16);
     LOG_FILE.print(" OID:");
     LOG_FILE.print(sd_cid.oid[0]);
     LOG_FILE.println(sd_cid.oid[1]);
 
-    LOG_FILE.print("Sd Name:");
+    LOG_FILE.print(" Name:");
     LOG_FILE.print(sd_cid.pnm[0]);
     LOG_FILE.print(sd_cid.pnm[1]);
     LOG_FILE.print(sd_cid.pnm[2]);
     LOG_FILE.print(sd_cid.pnm[3]);
-    LOG_FILE.println(sd_cid.pnm[4]);
+    LOG_FILE.print(sd_cid.pnm[4]);
 
-    LOG_FILE.print("Sd Date:");
+    LOG_FILE.print(" Date:");
     LOG_FILE.print(sd_cid.mdtMonth());
     LOG_FILE.print("/");
     LOG_FILE.println(sd_cid.mdtYear());
 
-    LOG_FILE.print("Sd Serial:");
+    LOG_FILE.print(" Serial:");
     LOG_FILE.println(sd_cid.psn());
-    LOG_FILE.sync();
   }
+  LOG_FILE.sync();
 }
 
 bool VerifyISOPVD(SCSI_DEVICE *dev, unsigned sector_size, bool mode2)
@@ -202,13 +236,13 @@ bool VerifyISOPVD(SCSI_DEVICE *dev, unsigned sector_size, bool mode2)
   if(mode2) seek += 8;
   bool ret = false;
 
-  dev->m_file->seekSet(seek);
-  dev->m_file->read(m_buf, 2048);
+  dev->m_file.seekSet(seek);
+  dev->m_file.read(m_buf, 2048);
 
   ret = ((m_buf[0] == 1 && !strncmp((char *)&m_buf[1], "CD001", 5) && m_buf[6] == 1) ||
         (m_buf[8] == 1 && !strncmp((char *)&m_buf[9], "CDROM", 5) && m_buf[14] == 1));
 
-  dev->m_file->rewind();
+  dev->m_file.rewind();
   return ret;
 }
 
@@ -220,18 +254,19 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
 {
   dev->m_fileSize= 0;
   dev->m_sector_offset = 0;
+  dev->flags = 0;
   dev->m_blocksize = blocksize;
   dev->m_rawblocksize = blocksize;
-  dev->m_file = file;
-  if(!dev->m_file->isOpen()) { goto failed; }
+  dev->m_file = *file;
+  if(!dev->m_file.isOpen()) { goto failed; }
 
-  dev->m_fileSize = dev->m_file->size();
+  dev->m_fileSize = dev->m_file.size();
   
   if(dev->m_fileSize < 1) {
     LOG_FILE.println(" - file is 0 bytes, can not use.");
     goto failed;
   }
-  if(!dev->m_file->isContiguous())
+  if(!dev->m_file.isContiguous())
   {
     LOG_FILE.println(" - file is fragmented, see https://github.com/erichelgeson/BlueSCSI/wiki/Image-File-Fragmentation");
   }
@@ -243,19 +278,18 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
     // Borrowed from PCEM
     if(VerifyISOPVD(dev, CDROM_COMMON_SECTORSIZE, false)) {
       dev->m_rawblocksize = CDROM_COMMON_SECTORSIZE;
-      dev->m_mode2 = false;
+      SET_DEVICE_FLAG(dev->flags, SCSI_DEVICE_FLAG_OPTICAL_MODE2);
     } else if(VerifyISOPVD(dev, CDROM_RAW_SECTORSIZE, false)) {
       dev->m_rawblocksize = CDROM_RAW_SECTORSIZE;
-      dev->m_mode2 = false;
-      dev->m_raw = true;
+      SET_DEVICE_FLAG(dev->flags, SCSI_DEVICE_FLAG_OPTICAL_RAW);
       dev->m_sector_offset = 16;
     } else if(VerifyISOPVD(dev, 2336, true)) {
       dev->m_rawblocksize = 2336;
-      dev->m_mode2 = true;
+      SET_DEVICE_FLAG(dev->flags, SCSI_DEVICE_FLAG_OPTICAL_MODE2);
     } else if(VerifyISOPVD(dev, CDROM_RAW_SECTORSIZE, true)) {
       dev->m_rawblocksize = CDROM_RAW_SECTORSIZE;
-      dev->m_mode2 = true;
-      dev->m_raw = true;
+      SET_DEVICE_FLAG(dev->flags, SCSI_DEVICE_FLAG_OPTICAL_MODE2);
+      SET_DEVICE_FLAG(dev->flags, SCSI_DEVICE_FLAG_OPTICAL_RAW);
       dev->m_sector_offset = 24;
     } else {
       // Last ditch effort
@@ -264,7 +298,7 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
         goto failed;
       }
 
-      dev->m_raw = true;
+      SET_DEVICE_FLAG(dev->flags, SCSI_DEVICE_FLAG_OPTICAL_RAW);
 
       if(!(dev->m_fileSize % CDROM_COMMON_SECTORSIZE)) {
         // try a multiple of 2048
@@ -291,17 +325,17 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
   LOG_FILE.println("MiB");
 
   if(dev->m_type == SCSI_DEVICE_OPTICAL) {
-    LOG_FILE.print(" MODE2:");LOG_FILE.print(dev->m_mode2);
-    LOG_FILE.print(" BlockSize:");LOG_FILE.println(dev->m_rawblocksize);
+    LOG_FILE.print(" MODE2:");LOG_FILE.print(IS_MODE2(dev->flags));
+    LOG_FILE.print(" BlockSize:");LOG_FILE.println(IS_RAW(dev->flags));
   }
   return true; // File opened
 
 failed:    
   
-  dev->m_file->close();
+  dev->m_file.close();
   dev->m_fileSize = dev->m_blocksize = 0; // no file
-  delete dev->m_file;
-  dev->m_file = NULL;
+  //delete dev->m_file;
+  //dev->m_file = NULL;
   return false;
 }
 
@@ -324,15 +358,6 @@ void setup()
   for(unsigned i = 0; i < MAX_SCSI_COMMAND; i++)
   {
     scsi_command_table[i] = onUnimplemented;
-  }
-
-  // zero all SCSI device structs
-  for(unsigned id = 0; id < NUM_SCSIID; id++)
-  {
-    for(unsigned lun = 0; lun < NUM_SCSILUN; lun++)
-    {
-      memset(&scsi_device_list[id][lun], 0, sizeof(SCSI_DEVICE));
-    }
   }
 
   // SCSI commands that just need to return ok
@@ -483,20 +508,24 @@ void setup()
 
   if(!sd_ready) {
 #if DEBUG > 0
-    Serial.println("SD initialization failed!");
+    Serial.println("SD Init failed!");
 #endif
     flashError(ERROR_NO_SDCARD);
   }
-  initFileLog(mhz);
-  readSDCardInfo();
+  initFileLog();
+  readSDCardInfo(mhz);
 
   //HD image file open
   scsi_id_mask = 0x00;
 
-  // Look for this file to enable MSTE_MODE
-  if(SD.exists("MSTE_MODE")) {
-    LOG_FILE.println("MSTE_MODE - IDs treated as LUNs");
-    megaste_mode = true;
+  if(ini_getl("SCSI", "MapLunsToIDs", 0, BLUESCSI_INI))
+  {
+    LOG_FILE.println("IDs treated as LUNs for ID0");
+    ids_as_luns = true;
+  }
+
+  if(SD.exists("scsi-config.txt")) {
+    LOG_FILE.println("scsi-config.txt is deprecated, use bluescsi.ini");
   }
 
   // Iterate over the root path in the SD card looking for candidate image files.
@@ -540,7 +569,7 @@ void setup()
 
 void findDriveImages(FsFile root) {
   bool image_ready;
-  FsFile *file = NULL;
+  FsFile file;
   char path_name[MAX_FILE_PATH+1];
   root.getName(path_name, sizeof(path_name));
   SD.chdir(path_name);
@@ -564,14 +593,11 @@ void findDriveImages(FsFile root) {
     }
 
     // Valid file, open for reading/writing.
-    file = new FsFile(SD.open(name, O_RDWR));
-    if(file && file->isFile()) {
+    file = SD.open(name, O_RDWR);
+    if(file && file.isFile()) {
       SCSI_DEVICE_TYPE device_type;
       if(tolower(name[1]) != 'd') {
-        file->close();
-        delete file;
-        LOG_FILE.print("Not an image: ");
-        LOG_FILE.println(name);
+        file.close();
         continue;
       }
       
@@ -581,10 +607,7 @@ void findDriveImages(FsFile root) {
       case 'c': device_type = SCSI_DEVICE_OPTICAL;
       break;
       default:
-        file->close();
-        delete file;
-        LOG_FILE.print("Not an image: ");
-        LOG_FILE.println(name);
+        file.close();
         continue;
       }
 
@@ -597,7 +620,7 @@ void findDriveImages(FsFile root) {
       // We only require the minimum and read in the next if provided.
       int file_name_length = strlen(name);
       if(file_name_length > 2) { // HD[N]
-        int tmp_id = name[HDIMG_ID_POS] - '0';
+        int tmp_id = CHAR_TO_INT(name[HDIMG_ID_POS]);
 
         // If valid id, set it, else use default
         if(tmp_id > -1 && tmp_id < 8) {
@@ -609,7 +632,7 @@ void findDriveImages(FsFile root) {
       }
 
       if(file_name_length > 3) { // HDN[N]
-        int tmp_lun = name[HDIMG_LUN_POS] - '0';
+        int tmp_lun = CHAR_TO_INT(name[HDIMG_LUN_POS]);
 
         // If valid lun, set it, else use default
         if(tmp_lun == 0 || tmp_lun == 1) {
@@ -622,11 +645,11 @@ void findDriveImages(FsFile root) {
 
       int blk1 = 0, blk2, blk3, blk4 = 0;
       if(file_name_length > 8) { // HD00_[111]
-        blk1 = name[HDIMG_BLK_POS] - '0';
-        blk2 = name[HDIMG_BLK_POS+1] - '0';
-        blk3 = name[HDIMG_BLK_POS+2] - '0';
+        blk1 = CHAR_TO_INT(name[HDIMG_BLK_POS]);
+        blk2 = CHAR_TO_INT(name[HDIMG_BLK_POS+1]);
+        blk3 = CHAR_TO_INT(name[HDIMG_BLK_POS+2]);
         if(file_name_length > 9) // HD00_NNN[1]
-          blk4 = name[HDIMG_BLK_POS+3] - '0';
+          blk4 = CHAR_TO_INT(name[HDIMG_BLK_POS+3]);
       }
       if(blk1 == 2 && blk2 == 5 && blk3 == 6) {
         blk = 256;
@@ -641,7 +664,7 @@ void findDriveImages(FsFile root) {
         LOG_FILE.print(" - ");
         LOG_FILE.print(name);
         dev->m_type = device_type;
-        image_ready = hddimageOpen(dev, file, id, lun, blk);
+        image_ready = hddimageOpen(dev, &file, id, lun, blk);
         if(image_ready) { // Marked as a responsive ID
           scsi_id_mask |= 1<<id;
           
@@ -649,16 +672,16 @@ void findDriveImages(FsFile root) {
           {
              case SCSI_DEVICE_HDD:
               // default SCSI HDD
-              dev->inquiry_block = &default_hdd;        
+              dev->inquiry_block = default_hdd;        
               break;
               
               case SCSI_DEVICE_OPTICAL:
               // default SCSI CDROM
-              dev->inquiry_block = &default_optical;
+              dev->inquiry_block = default_optical;
               break;
           }
 
-          readSCSIDeviceConfig(dev);
+          readSCSIDeviceConfig(id, dev);
         }
       }      
     }
@@ -671,32 +694,14 @@ void findDriveImages(FsFile root) {
 /*
  * Setup initialization logfile
  */
-void initFileLog(int success_mhz) {
+void initFileLog() {
   LOG_FILE = SD.open(LOG_FILENAME, O_WRONLY | O_CREAT | O_TRUNC);
-  LOG_FILE.println("BlueSCSI <-> SD - https://github.com/erichelgeson/BlueSCSI");
+  LOG_FILE.println("BlueSCSI https://github.com/erichelgeson/BlueSCSI");
   LOG_FILE.print("VER: ");
   LOG_FILE.print(VERSION);
   LOG_FILE.println(BUILD_TAGS);
   LOG_FILE.print("DEBUG:");
-  LOG_FILE.print(DEBUG);
-  LOG_FILE.print(" SDFAT_FILE_TYPE:");
-  LOG_FILE.println(SDFAT_FILE_TYPE);
-  LOG_FILE.print("SdFat version: ");
-  LOG_FILE.println(SD_FAT_VERSION_STR);
-  LOG_FILE.print("Sd Format: ");
-  switch(SD.vol()->fatType()) {
-    case FAT_TYPE_EXFAT:
-    LOG_FILE.println("exFAT");
-    break;
-    default:
-    LOG_FILE.print("FAT 32/16/12 - Consider formatting the SD Card with exFAT for improved performance.");
-  }
-  LOG_FILE.print("SPI speed: ");
-  LOG_FILE.print(success_mhz);
-  LOG_FILE.println("Mhz");
-  LOG_FILE.print("SdFat Max FileName Length: ");
-  LOG_FILE.println(MAX_FILE_PATH);
-  LOG_FILE.println("Initialized SD Card - let's go!");
+  LOG_FILE.println(DEBUG);
   LOG_FILE.sync();
 }
 
@@ -730,7 +735,7 @@ void finalizeFileLog() {
     }
     LOG_FILE.println(":");
   }
-  LOG_FILE.println("Finished initialization of SCSI Devices - Entering main loop.");
+  LOG_FILE.println("Finished configuration - Starting BlueSCSI");
   LOG_FILE.sync();
   #if DEBUG < 2
   LOG_FILE.close();
@@ -948,7 +953,7 @@ void writeDataPhaseSD(SCSI_DEVICE *dev, uint32_t adds, uint32_t len)
   SCSI_PHASE_CHANGE(SCSI_PHASE_DATAIN);
   //Bus settle delay 400ns, file.seek() measured at over 1000ns.
   uint64_t pos = (uint64_t)adds * dev->m_rawblocksize;
-  dev->m_file->seekSet(pos);
+  dev->m_file.seekSet(pos);
 #ifdef XCVR
   TRANSCEIVER_IO_SET(vTR_DBP,TR_OUTPUT)
 #endif
@@ -957,7 +962,7 @@ void writeDataPhaseSD(SCSI_DEVICE *dev, uint32_t adds, uint32_t len)
   for(uint32_t i = 0; i < len; i++) {
       // Asynchronous reads will make it faster ...
     m_resetJmp = false;
-    dev->m_file->read(m_buf, dev->m_rawblocksize);
+    dev->m_file.read(m_buf, dev->m_rawblocksize);
     enableResetJmp();
 
     writeDataLoop(dev->m_blocksize, &m_buf[dev->m_sector_offset]);
@@ -1029,18 +1034,18 @@ void readDataPhaseSD(SCSI_DEVICE *dev, uint32_t adds, uint32_t len)
   //Bus settle delay 400ns, file.seek() measured at over 1000ns.
 
   uint64_t pos = (uint64_t)adds * dev->m_blocksize;
-  dev->m_file->seekSet(pos);
+  dev->m_file.seekSet(pos);
   for(uint32_t i = 0; i < len; i++) {
     m_resetJmp = true;
     readDataLoop(dev->m_blocksize, m_buf);
     m_resetJmp = false;
-    dev->m_file->write(m_buf, dev->m_blocksize);
+    dev->m_file.write(m_buf, dev->m_blocksize);
     // If a reset happened while writing, break and let the flush happen before it is handled.
     if (m_isBusReset) {
       break;
     }
   }
-  dev->m_file->flush();
+  dev->m_file.flush();
   enableResetJmp();
 }
 
@@ -1055,7 +1060,7 @@ void verifyDataPhaseSD(SCSI_DEVICE *dev, uint32_t adds, uint32_t len)
   //Bus settle delay 400ns, file.seek() measured at over 1000ns.
 
   uint64_t pos = (uint64_t)adds * dev->m_blocksize;
-  dev->m_file->seekSet(pos);
+  dev->m_file.seekSet(pos);
   for(uint32_t i = 0; i < len; i++) {
     readDataLoop(dev->m_blocksize, m_buf);
     // This has just gone through the transfer to make things work, a compare would go here.
@@ -1079,6 +1084,12 @@ void MsgIn2(int msg)
  */
 void loop() 
 {
+  byte m_id = 0;                  // Currently responding SCSI-ID
+  byte m_lun = 0xff;              // Logical unit number currently responding
+  byte m_sts = 0;                 // Status byte
+  byte m_msg = 0;                 // Message bytes
+  byte m_msb[256];                // Command storage bytes
+
 #ifdef XCVR
   // Reset all DB and Target pins, switch transceivers to input
   // Precaution against bugs or jumps which don't clean up properly
@@ -1088,9 +1099,6 @@ void loop()
   TRANSCEIVER_IO_SET(vTR_INITIATOR,TR_INPUT)
 #endif
 
-  //int msg = 0;
-  m_msg = 0;
-  m_lun = 0xff;
   SCSI_DEVICE *dev = (SCSI_DEVICE *)0; // HDD image for current SCSI-ID, LUN
 
   do {} while( SCSI_IN(vBSY) || !SCSI_IN(vSEL) || SCSI_IN(vRST));
@@ -1221,7 +1229,7 @@ void loop()
   if(m_lun > MAX_SCSILUN)
   {
     m_lun = (cmd[1] & 0xe0) >> 5;
-    if(megaste_mode)
+    if(ids_as_luns)
     {
       // if this mode is enabled we are going to substitute all SCSI IDs as LUNs on ID0
       // this is because the MegaSTE internal adapter only supports ID0. This lets multiple 
@@ -1255,16 +1263,16 @@ void loop()
       LOGN("onInquiry - InvalidLUN");
       dev = &(scsi_device_list[m_id][0]);
 
-      byte temp = dev->inquiry_block->raw[0];
+      byte temp = dev->inquiry_block.raw[0];
 
       // If the LUN is invalid byte 0 of inquiry block needs to be 7fh
-      dev->inquiry_block->raw[0] = 0x7f;
+      dev->inquiry_block.raw[0] = 0x7f;
 
       // only write back what was asked for
-      writeDataPhase(cmd[4], dev->inquiry_block->raw);
+      writeDataPhase(cmd[4], dev->inquiry_block.raw);
 
       // return it back to normal if it was altered
-      dev->inquiry_block->raw[0] = temp;
+      dev->inquiry_block.raw[0] = temp;
     }
     else if(cmd[0] == SCSI_REQUEST_SENSE)
     {
@@ -1290,7 +1298,7 @@ void loop()
   }
 
   dev = &(scsi_device_list[m_id][m_lun]);
-  if(!dev->m_file)
+  if(!dev->m_file.isOpen())
   {
     dev->m_senseKey = SCSI_SENSE_ILLEGAL_REQUEST;
     dev->m_additional_sense_code = SCSI_ASC_LOGICAL_UNIT_NOT_SUPPORTED;
@@ -1359,7 +1367,7 @@ static byte onNOP(SCSI_DEVICE *dev, const byte *cdb)
  */
 byte onInquiry(SCSI_DEVICE *dev, const byte *cdb)
 {
-  writeDataPhase(cdb[4] < 47 ? cdb[4] : 47, dev->inquiry_block->raw);
+  writeDataPhase(cdb[4] < 47 ? cdb[4] : 47, dev->inquiry_block.raw);
   return SCSI_STATUS_GOOD;
 }
 
@@ -1891,7 +1899,7 @@ byte onWriteBuffer(SCSI_DEVICE *dev, const byte *cdb)
 byte onReadBuffer(SCSI_DEVICE *dev, const byte *cdb)
 {
   byte mode = cdb[1] & 7; 
-  uint32_t allocLength = ((uint32_t)cdb[6] << 16) | ((uint32_t)cdb[7] << 8) | cdb[8];
+  unsigned m_scsi_buf_size = 0;
   
   LOGN("-ReadBuffer");
   LOGHEXN(mode);
@@ -1911,6 +1919,7 @@ byte onReadBuffer(SCSI_DEVICE *dev, const byte *cdb)
     writeDataPhase(4 + m_scsi_buf_size, m_buf);
 
     #if DEBUG > 0
+    uint32_t allocLength = ((uint32_t)cdb[6] << 16) | ((uint32_t)cdb[7] << 8) | cdb[8];
     for (unsigned i = 0; i < allocLength; i++) {
       LOGHEX(m_scsi_buf[i]);LOG(" ");
     }

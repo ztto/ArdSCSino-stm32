@@ -15,6 +15,11 @@
 #define SCSI_BUF_SIZE 512      // Size of the SCSI Buffer
 #define HDD_BLOCK_SIZE 512
 #define OPTICAL_BLOCK_SIZE 2048
+#define BLUESCSI_INI "bluescsi.ini"
+
+#define SCSI_VENDOR_LENGTH 8
+#define SCSI_PRODUCT_LENGTH 16
+#define SCSI_REVISION_LENGTH 4
 
 // HDD format
 #define MAX_BLOCKSIZE 4096     // Maximum BLOCK size
@@ -31,6 +36,18 @@ enum SCSI_DEVICE_TYPE
   SCSI_DEVICE_HDD,
   SCSI_DEVICE_OPTICAL,
 };
+
+#define SCSI_DEVICE_FLAG_OPTICAL_MODE2   0x1
+#define SCSI_DEVICE_FLAG_OPTICAL_RAW     0x2
+
+#define SET_DEVICE_FLAG(var, flag) (var |= flag)
+#define UNSET_DEVICE_FLAG(var, flag) (var &= ~flag)
+#define IS_DEVICE_FLAG_SET(var, flag) ((var & flag) == flag)
+#define IS_RAW(var) IS_DEVICE_FLAG_SET(var, SCSI_DEVICE_FLAG_OPTICAL_RAW)
+#define IS_MODE2(var) IS_DEVICE_FLAG_SET(var, SCSI_DEVICE_FLAG_OPTICAL_MODE2)
+
+#define INT_TO_CHAR(var) var+'0'
+#define CHAR_TO_INT(var) var-'0'
 
 #define CDROM_RAW_SECTORSIZE    2352
 #define CDROM_COMMON_SECTORSIZE 2048
@@ -124,7 +141,7 @@ enum SCSI_DEVICE_TYPE
 // SCSI output pin control: opendrain active LOW (direct pin drive)
 #define SCSI_OUT(VPIN,ACTIVE) { GPIOREG(VPIN)->BSRR = BITMASK(VPIN)<<((ACTIVE)?16:0); }
 
-// SCSI input pin check (inactive=0,avtive=1)
+// SCSI input pin check (inactive=0,active=1)
 #define SCSI_IN(VPIN) ((~GPIOREG(VPIN)->IDR>>(VPIN&15))&1)
 
 #define NOP(x) for(unsigned _nopcount = x; _nopcount; _nopcount--) { asm("NOP"); }
@@ -231,7 +248,8 @@ enum SCSI_DEVICE_TYPE
 */
 
 // Parity bit generation
-#define PTY(V)   (1^((V)^((V)>>1)^((V)>>2)^((V)>>3)^((V)>>4)^((V)>>5)^((V)>>6)^((V)>>7))&1)
+//#define PTY(V)   (1^((V)^((V)>>1)^((V)>>2)^((V)>>3)^((V)>>4)^((V)>>5)^((V)>>6)^((V)>>7))&1)
+#define PTY(n) ((1 ^ (n) ^ ((n)>>1) ^ ((n)>>2) ^ ((n)>>3) ^ ((n)>>4) ^ ((n)>>5) ^ ((n)>>6) ^ ((n)>>7)) & 1)
 
 // Data byte to BSRR register setting value conversion table
 // BSRR[31:24] =  DB[7:0]
@@ -263,7 +281,7 @@ uint32_t db_bsrr[256];
 
 
 
-struct SCSI_INQUIRY_DATA
+typedef struct _SCSI_INQUIRY_DATA
 {
   union
   {
@@ -306,23 +324,22 @@ struct SCSI_INQUIRY_DATA
   // raw bytes
   byte raw[64];
   };
-};
+} SCSI_INQUIRY_DATA;
 
 // HDD image
 typedef __attribute__((aligned(4))) struct _SCSI_DEVICE
 {
-	FsFile        *m_file;                  // File object
+	FsFile        m_file;                  // File object
 	uint64_t      m_fileSize;               // File size
 	uint16_t      m_blocksize;              // SCSI BLOCK size
   uint16_t      m_rawblocksize;           // OPTICAL raw sector size
   uint8_t       m_type;                   // SCSI device type
   uint32_t      m_blockcount;             // blockcount
-  bool          m_raw;                    // Raw disk
-  SCSI_INQUIRY_DATA *inquiry_block;       // SCSI information
+  SCSI_INQUIRY_DATA inquiry_block;       // SCSI information
   uint8_t       m_senseKey;               // Sense key
   uint16_t      m_additional_sense_code;  // ASC/ASCQ 
-  bool          m_mode2;                  // MODE2 CDROM
   uint8_t       m_sector_offset;          // optical sector offset for missing sync header
+  uint8_t       flags;                    // various device flags
 } SCSI_DEVICE;
 
 static byte cdb_len_lookup[] = {

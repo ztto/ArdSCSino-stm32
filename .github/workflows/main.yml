@@ -27,8 +27,5 @@ jobs:
         python -m pip install --upgrade pip
         pip install --upgrade platformio
 
-    - name: Install library dependencies
-      run: pio lib -g install 1
-
     - name: Run PlatformIO
-      run: pio ci --project-conf platformio.ini .
+      run: pio run -e STM32F1 -e STM32F1-USB -e STM32F1-XCVR -e STM32F1-USB-96MHz -e STM32F1-USB-128MHz
