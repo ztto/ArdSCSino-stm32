@@ -593,24 +593,27 @@ void findDriveImages(FsFile root) {
     }
 
     // Valid file, open for reading/writing.
-    file = SD.open(name, O_RDWR);
-    if(file && file.isFile()) {
-      SCSI_DEVICE_TYPE device_type;
-      if(tolower(name[1]) != 'd') {
-        file.close();
-        continue;
-      }
-      
-      switch (tolower(name[0])) {
-      case 'h': device_type = SCSI_DEVICE_HDD;
+    SCSI_DEVICE_TYPE device_type;
+    if(tolower(name[1]) != 'd') {
+      file.close();
+      continue;
+    }
+    
+    switch (tolower(name[0])) {
+    case 'h': 
+      device_type = SCSI_DEVICE_HDD;
+      file = SD.open(name, O_RDWR);
       break;
-      case 'c': device_type = SCSI_DEVICE_OPTICAL;
+    case 'c': 
+      device_type = SCSI_DEVICE_OPTICAL;
+      file = SD.open(name, O_RDONLY);
       break;
-      default:
-        file.close();
-        continue;
-      }
+    default:
+      file.close();
+      continue;
+    }
 
+    if(file && file.isFile()) {
       // Defaults for Hard Disks
       int id  = 1; // 0 and 3 are common in Macs for physical HD and CD, so avoid them.
       int lun = 0;
