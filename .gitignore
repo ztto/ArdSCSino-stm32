@@ -3,3 +3,4 @@
 .vscode/
 workspace.code-workspace
 dist/
+hw/*/*-backups/
