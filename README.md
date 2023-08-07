@@ -1,23 +1,23 @@
 # ArdSCSino-stm32
 
-ArdSCSino-stm32 とは たんぼ（TNB製作所）(https://twitter.com/h_koma2) さんが作成した ArdSCSino のSTM32版です<br>
-ArdSxSino とは SCSI(SASI)デバイス（ハードディスク）を arduino で再現するハードウエアです。<br>
-許可を頂いて公開することになりました。<br>
+ArdSCSino-stm32 is the STM32 version of ArdSCSino.
+ArdSxSino is hardware that replicates SCSI storage devices using Arduino.
 
-X68000 のSASI対応<br>
-注意１．ACE、EXPERTでは動作していますがPROではDSKBENCHが終了しない等問題があります<br>
-注意２．SHARP X1turbo、NEC PC98、での動作確認が出来ていません<br>
+SASI Support for Sharp X68000
+Note 1: It works with ACE and EXPERT, but there are issues with PRO, such as DSKBENCH not exiting properly.
+Note 2: Operation confirmation has not been performed on SHARP X1turbo, NEC PC98.
 
-「scsi-config.txt」ファイルに各種パラメータを記述できるようになりました<br>
-　※サンプルを置いています<br>
-記述方法<br>
-・１列目：ベンダ名　　　半角8文字<br>
-・２列目：プロダクト名　半角16文字<br>
-・３列目：バージョン　　半角4文字<br>
-・４列目：タイプ　　　　半角1文字  <0 for STANDARD, 1 for SHARP X1turbo><br>
-・５列目：WAIT時間　　　半角3文字  <SASIは、80 程度の値を入れて異常終了しない値を設定する><br>
+You can now describe various parameters in the "scsi-config.txt" file.
+Sample is provided.
 
-例）･は半角空白と思ってください<br>
+SCSI Description format:
+Column 1: Vendor Name (8 characters)
+Column 2: Product Name (16 characters)
+Column 3: Version (4 characters)
+Column 4: Type (1 character) <0 for STANDARD, 1 for SHARP X1turbo>
+Column 5: WAIT time (3 characters) <For SASI, set a value around 80 to prevent abnormal termination>
+
+Example: Please consider '.' as a half-width space<br>
 --------------<br>
 NECGATE･<br>
 ST410800N･･･････<br>
@@ -27,9 +27,8 @@ ST410800N･･･････<br>
 --------------<br>
 
 # Setup<br>
-* platformio を使用しています。<br>
-
- マイクロSDCARDアダプタとして以下を使用しています。<br>
-
- Hirose DM3AT-SF-PEJM5<br>
+Using platformio.
+Using the following as a MicroSDCARD adapter:
+<br>
+Hirose DM3AT-SF-PEJM5<br>
 
