@@ -442,8 +442,8 @@ void setup()
 #endif
 
   // PIN initialization
-  gpio_mode(LED2, GPIO_OUTPUT_PP);
-  gpio_mode(LED, GPIO_OUTPUT_OD);
+  gpio_mode(LED2, LED2_MODE);
+  gpio_mode(LED, LED_MODE);
 
   // Image Set Select Init
   gpio_mode(IMAGE_SELECT1, GPIO_INPUT_PU);

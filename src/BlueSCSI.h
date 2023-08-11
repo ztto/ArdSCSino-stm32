@@ -99,8 +99,6 @@ enum SCSI_DEVICE_TYPE
 #define IO        PB7      // SCSI:I/O
 
 #define SD_CS     PA4      // SDCARD:CS
-#define LED       PC13     // LED
-#define LED2      PA0      // External LED
 
 // Image Set Selector
 #ifdef XCVR
@@ -116,16 +114,28 @@ enum SCSI_DEVICE_TYPE
 #define PBREG GPIOB->regs
 #define PCREG GPIOC->regs
 
-// LED control
-#define LED_ON()  PCREG->BSRR = 0b00100000000000000000000000000000; PAREG->BSRR = 0b00000000000000000000000000000001;
-#define LED_OFF() PCREG->BSRR = 0b00000000000000000010000000000000; PAREG->BSRR = 0b00000000000000010000000000000000;
-
 // Virtual pin (Arduio compatibility is slow, so make it MCU-dependent)
 #define PA(BIT)       (BIT)
 #define PB(BIT)       (BIT+16)
+#define PC(BIT)       (BIT+32)
+
 // Virtual pin decoding
-#define GPIOREG(VPIN)    ((VPIN)>=16?PBREG:PAREG)
+#define GPIOREG(VPIN)    ((VPIN)>=16?((VPIN)>=32?PCREG:PBREG):PAREG)
 #define BITMASK(VPIN) (1<<((VPIN)&15))
+
+// Built-in LED
+#define LED       PC13
+#define vLED      PC(13)
+#define LED_MODE  GPIO_OUTPUT_OD
+
+// External LED
+#define LED2      PA0
+#define vLED2     PA(0)
+#define LED2_MODE GPIO_OUTPUT_PP
+
+// LED control
+#define LED_ON() GPIOREG(vLED)->BSRR = BITMASK(vLED) << (LED_MODE == GPIO_OUTPUT_PP ? 0 : 16); GPIOREG(vLED2)->BSRR = BITMASK(vLED2) << (LED2_MODE == GPIO_OUTPUT_PP ? 0 : 16);
+#define LED_OFF() GPIOREG(vLED)->BSRR = BITMASK(vLED) << (LED_MODE == GPIO_OUTPUT_PP ? 16 : 0); GPIOREG(vLED2)->BSRR = BITMASK(vLED2) << (LED2_MODE == GPIO_OUTPUT_PP ? 16 : 0);
 
 #define vATN       PA(8)      // SCSI:ATN
 #define vBSY       PA(9)      // SCSI:BSY
