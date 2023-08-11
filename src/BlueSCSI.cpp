@@ -1936,6 +1936,9 @@ byte onReadBuffer(SCSI_DEVICE *dev, const byte *cdb)
 {
   byte mode = cdb[1] & 7; 
   unsigned m_scsi_buf_size = 0;
+  #if DEBUG > 0
+  uint32_t allocLength = ((uint32_t)cdb[6] << 16) | ((uint32_t)cdb[7] << 8) | cdb[8];
+  #endif
   
   LOGN("-ReadBuffer");
   LOGHEXN(mode);
@@ -1955,7 +1958,6 @@ byte onReadBuffer(SCSI_DEVICE *dev, const byte *cdb)
     writeDataPhase(4 + m_scsi_buf_size, m_buf);
 
     #if DEBUG > 0
-    uint32_t allocLength = ((uint32_t)cdb[6] << 16) | ((uint32_t)cdb[7] << 8) | cdb[8];
     for (unsigned i = 0; i < allocLength; i++) {
       LOGHEX(m_scsi_buf[i]);LOG(" ");
     }
