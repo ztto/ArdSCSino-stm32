@@ -51,12 +51,12 @@
 #define SCSI_READ12                 0xA8
 #define SCSI_VERIFY12               0xAF
 
-#define BLUESCSI_LIST_FILES        0xC0
-#define BLUESCSI_GET_FILE          0xC1
-#define BLUESCSI_COUNT_FILES       0xC2
-#define BLUESCSI_SEND_PREP         0xC3
-#define BLUESCSI_SEND              0xC4
-#define BLUESCSI_SEND_END          0xC5
+#define BLUESCSI_LIST_FILES        0xD0
+#define BLUESCSI_GET_FILE          0xD1
+#define BLUESCSI_COUNT_FILES       0xD2
+#define BLUESCSI_SEND_PREP         0xD3
+#define BLUESCSI_SEND              0xD4
+#define BLUESCSI_SEND_END          0xD5
 
 
 
