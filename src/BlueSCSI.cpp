@@ -105,6 +105,14 @@ SCSI_COMMAND_HANDLER(onReadDiscInformation);
 static uint32_t MSFtoLBA(const byte *msf);
 static void LBAtoMSF(const uint32_t lba, byte *msf);
 
+// BlueSCSI Toolbox Vendor Commands
+SCSI_COMMAND_HANDLER(onCountFiles);
+SCSI_COMMAND_HANDLER(onGetFile);
+SCSI_COMMAND_HANDLER(onListFiles);
+SCSI_COMMAND_HANDLER(onSendFilePrep);
+SCSI_COMMAND_HANDLER(onSendFile10);
+SCSI_COMMAND_HANDLER(onSendFileEnd);
+
 static void flashError(const unsigned error);
 void onBusReset(void);
 void initFileLog(void);
@@ -394,6 +402,14 @@ void setup()
   scsi_command_table[SCSI_READ_DVD_STRUCTURE] = onReadDVDStructure;
   scsi_command_table[SCSI_READ_DISC_INFORMATION] = onReadDiscInformation;
 
+  // BlueSCSI Toolbox Commands
+  scsi_command_table[BLUESCSI_COUNT_FILES] = onCountFiles;
+  scsi_command_table[BLUESCSI_GET_FILE] = onGetFile;
+  scsi_command_table[BLUESCSI_LIST_FILES] = onListFiles;
+  scsi_command_table[BLUESCSI_SEND_PREP] = onSendFilePrep;
+  scsi_command_table[BLUESCSI_SEND] = onSendFile10;
+  scsi_command_table[BLUESCSI_SEND_END] = onSendFileEnd;
+
   // clear and initialize default inquiry blocks
   // default SCSI HDD
   memset(&default_hdd, 0, sizeof(default_hdd));
@@ -417,7 +433,7 @@ void setup()
   memcpy(&default_optical.revision, "1.9a", 4);
   default_optical.release = 0x20;
   memcpy(&default_optical.revision_date, "1995", 4);
-
+  
   // Serial initialization
 #if DEBUG > 0
   Serial.begin(9600);
@@ -741,7 +757,7 @@ void finalizeFileLog() {
   LOG_FILE.println("Finished configuration - Starting BlueSCSI");
   LOG_FILE.sync();
   #if DEBUG < 2
-  LOG_FILE.close();
+  //LOG_FILE.close();
   #endif
 }
 
@@ -1715,8 +1731,19 @@ byte onModeSense(SCSI_DEVICE *dev, const byte *cdb)
         }
         if(pageCode != SCSI_SENSE_MODE_ALL) break;
       }
-      break; // Don't want SCSI_SENSE_MODE_ALL falling through to error condition
-
+    case SCSI_SENSE_MODE_VENDOR_BLUESCSI:
+    {
+      const byte page42[42]  = {
+        'B','l','u','e','S','C','S','I',' ','i','s',' ','t','h','e',' ','B','E','S','T',' ',
+        'S','T','O','L','E','N',' ','F','R','O','M',' ','B','L','U','E','S','C','S','I',0x00
+      };
+      m_buf[a + 0] = SCSI_SENSE_MODE_VENDOR_BLUESCSI; // Page code
+      m_buf[a + 1] = sizeof(page42); // Page length
+      memcpy(&m_buf[a + 2], page42, sizeof(page42));
+      a += 2 + sizeof(page42);
+      if(pageCode != SCSI_SENSE_MODE_ALL) break;
+    }
+    break; // Don't want SCSI_SENSE_MODE_ALL falling through to error condition
     default:
       dev->m_senseKey = SCSI_SENSE_ILLEGAL_REQUEST;
       dev->m_additional_sense_code = SCSI_ASC_INVALID_FIELD_IN_CDB;
@@ -1799,6 +1826,221 @@ byte onModeSense(SCSI_DEVICE *dev, const byte *cdb)
   }
 
   writeDataPhase(length < a ? length : a, m_buf);
+  return SCSI_STATUS_GOOD;
+}
+
+// onListFiles
+byte onListFiles(SCSI_DEVICE *dev, const byte *cdb) {
+  File dir;
+  File file;
+
+  memset(m_buf, 0, MAC_BLK_SIZE);
+  int ENTRY_SIZE = 40;
+  char name[MAX_MAC_PATH + 1];
+  dir.open("/shared");
+  dir.rewindDirectory();
+  uint8_t index = 0;
+  while (file.openNext(&dir, O_RDONLY))
+  {
+    uint8_t isDir = file.isDirectory() ? 0x00 : 0x01;
+    file.getName(name, MAX_MAC_PATH + 1);
+    uint64_t size = file.fileSize();
+    file.close();
+    if(name[0] == '.')
+      continue;
+    byte file_entry[ENTRY_SIZE] = {0};
+    file_entry[0] = index;
+    file_entry[1] = isDir;
+    int c = 0;
+    for(int i = 2; i < (MAX_MAC_PATH + 1 + 2); i++) {   // bytes 2 - 34
+      file_entry[i] = name[c++];
+    }
+    file_entry[35] = 0; //(size >> 32) & 0xff;
+    file_entry[36] = (size >> 24) & 0xff; 
+    file_entry[37] = (size >> 16) & 0xff; 
+    file_entry[38] = (size >> 8) & 0xff;
+    file_entry[39] = (size) & 0xff;
+    memcpy(&(m_buf[ENTRY_SIZE * index]), file_entry, ENTRY_SIZE);
+    index = index + 1;
+  }
+  dir.close();
+  writeDataPhase(MAC_BLK_SIZE, (const byte *)m_buf);
+  return SCSI_STATUS_GOOD;
+}
+
+// Returns how many files exist in a directory so we know how many times to request list files.
+byte onCountFiles(SCSI_DEVICE *dev, const byte *cdb) {
+  File dir;
+  File file;
+  char name[MAX_MAC_PATH + 1];
+
+  dir.open("/shared");
+  dir.rewindDirectory();
+  uint16_t index = 0;
+  while (file.openNext(&dir, O_RDONLY))
+  {
+    if(file.getError() > 0)
+    {
+      file.close();
+      break;
+    }
+    file.getName(name, MAX_MAC_PATH + 1);
+    file.close();
+    // only count valid files.
+    if(name[0] != '.')
+      index = index + 1;
+  }
+  dir.close();
+
+  if(index > 100) {
+    dev->m_senseKey = SCSI_SENSE_ILLEGAL_REQUEST;
+    dev->m_additional_sense_code = OPEN_RETRO_SCSI_TOO_MANY_FILES;
+    return SCSI_STATUS_CHECK_CONDITION;
+  }
+  writeDataPhase(sizeof(index), (const byte *)&index);
+  return SCSI_STATUS_GOOD;
+}
+
+File get_file_from_index(uint8_t index)
+{
+  File dir;
+  FsFile file_test;
+  char name[MAX_MAC_PATH + 1];
+
+  dir.open("/shared");
+  dir.rewindDirectory(); // Back to the top
+  int count = 0;
+  while (file_test.openNext(&dir, O_RDONLY))
+  {
+    // If error there is no next file to open.
+    if(file_test.getError() > 0) {
+      file_test.close();
+      break;
+    }
+    file_test.getName(name, MAX_MAC_PATH + 1);
+
+    if(name[0] == '.')
+      continue;
+    if (count == index)
+    {
+      dir.close();
+      return file_test;
+    }
+    else
+    {
+      file_test.close();
+    }
+    count++;
+  }
+  file_test.close();
+  dir.close();
+  return file_test;
+}
+
+File file; // global so we can keep it open while transfering.
+byte onGetFile(SCSI_DEVICE *dev, const byte *cdb) {
+  uint8_t index = cdb[1];
+  uint32_t offset = ((uint32_t)cdb[2] << 24) | ((uint32_t)cdb[3] << 16) | ((uint32_t)cdb[4] << 8) | cdb[5];
+  if (offset == 0) // first time, open the file.
+  {
+    file = get_file_from_index(index);
+    if(!file.isDirectory() && !file.isReadable())
+    {
+      dev->m_senseKey = SCSI_SENSE_ILLEGAL_REQUEST;
+      dev->m_additional_sense_code = SCSI_ASC_INVALID_FIELD_IN_CDB;
+      return SCSI_STATUS_CHECK_CONDITION;
+    }
+  }
+  
+  uint32_t file_total = file.size();
+  memset(m_buf, 0, MAC_BLK_SIZE);
+  file.seekSet(offset * MAC_BLK_SIZE);
+  int read_bytes = file.read(m_buf, MAC_BLK_SIZE);
+  writeDataPhase(read_bytes, m_buf);
+  if(offset * MAC_BLK_SIZE >= file_total) // transfer done, close.
+  {
+    file.close();
+  }
+  return SCSI_STATUS_GOOD;
+}
+
+/*
+  Prepares a file for receving. The file name is null terminated in the scsi data.
+*/
+File receveFile;
+byte onSendFilePrep(SCSI_DEVICE *dev, const byte *cdb)
+{
+  char file_name[MAX_MAC_PATH+1];
+
+  memset(file_name, '\0', MAX_MAC_PATH+1);
+  readDataPhase(MAX_MAC_PATH+1, m_buf);
+  strcpy(file_name, (char *)m_buf);
+
+  SD.chdir("/shared");
+  receveFile.open(file_name, FILE_WRITE);
+  SD.chdir("/");
+  if(receveFile.isOpen() && receveFile.isWritable()) {
+    receveFile.rewind();
+    receveFile.sync();
+    return SCSI_STATUS_GOOD;
+  } else {
+    receveFile.close();
+    dev->m_senseKey = SCSI_SENSE_ILLEGAL_REQUEST;
+    dev->m_additional_sense_code = SCSI_ASC_INVALID_FIELD_IN_CDB;
+    return SCSI_STATUS_CHECK_CONDITION;
+  }
+}
+
+byte onSendFileEnd(SCSI_DEVICE *dev, const byte *cdb)
+{
+  receveFile.sync();
+  receveFile.close();
+  return SCSI_STATUS_GOOD;
+}
+
+byte onSendFile10(SCSI_DEVICE *dev, const byte *cdb)
+{
+  if(!receveFile.isOpen() || !receveFile.isWritable()) {
+      dev->m_senseKey = SCSI_SENSE_ILLEGAL_REQUEST;
+      dev->m_additional_sense_code = SCSI_ASC_INVALID_FIELD_IN_CDB;
+      return SCSI_STATUS_CHECK_CONDITION;
+  }
+
+  // Number of bytes sent this request, 1..512.
+  uint16_t bytes_sent = ((uint16_t)cdb[1] << 8)  | cdb[2];
+  // 512 byte offset of where to put these bytes.
+  uint32_t offset     = ((uint32_t)cdb[3] << 16) | ((uint32_t)cdb[4] << 8) | cdb[5];
+  uint16_t buf_size   = SCSI_BUF_SIZE;
+  // Check if last block of file, and not the only bock in file.
+  if(bytes_sent < buf_size)
+  {
+    buf_size = bytes_sent;
+  }
+  readDataPhase(buf_size, m_buf);
+  receveFile.seekCur(offset * SCSI_BUF_SIZE);
+  receveFile.write(m_buf, buf_size);
+  if(receveFile.getWriteError())
+  {
+      receveFile.clearWriteError();
+      receveFile.close();
+      dev->m_senseKey = SCSI_SENSE_ILLEGAL_REQUEST;
+      dev->m_additional_sense_code = SCSI_ASC_INVALID_FIELD_IN_CDB;
+      return SCSI_STATUS_CHECK_CONDITION;
+  }
+  return SCSI_STATUS_GOOD;
+}
+
+/*
+ * Read Defect Data
+ */
+byte onReadDefectData(SCSI_DEVICE *dev, const byte *cdb)
+{
+  byte response[4] = {
+    0x0, // Reserved
+    cdb[2], // echo back Reserved, Plist, Glist, Defect list format
+    cdb[7], cdb[8] // echo back defect list length
+  };
+  writeDataPhase(4, response);
   return SCSI_STATUS_GOOD;
 }
 
@@ -2004,20 +2246,6 @@ byte onSendDiagnostic(SCSI_DEVICE *dev, const byte *cdb)
     dev->m_additional_sense_code = SCSI_ASC_INVALID_FIELD_IN_CDB;
     return SCSI_STATUS_CHECK_CONDITION;
   }
-}
-
-/*
- * Read Defect Data
- */
-byte onReadDefectData(SCSI_DEVICE *dev, const byte *cdb)
-{
-  byte response[4] = {
-    0x0, // Reserved
-    cdb[2], // echo back Reserved, Plist, Glist, Defect list format
-    cdb[7], cdb[8] // echo back defect list length
-  };
-  writeDataPhase(4, response);
-  return SCSI_STATUS_GOOD;
 }
 
 static byte onReadTOC(SCSI_DEVICE *dev, const byte *cdb)

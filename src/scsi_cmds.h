@@ -51,6 +51,14 @@
 #define SCSI_READ12                 0xA8
 #define SCSI_VERIFY12               0xAF
 
+#define BLUESCSI_LIST_FILES        0xD0
+#define BLUESCSI_GET_FILE          0xD1
+#define BLUESCSI_COUNT_FILES       0xD2
+#define BLUESCSI_SEND_PREP         0xD3
+#define BLUESCSI_SEND              0xD4
+#define BLUESCSI_SEND_END          0xD5
+
+
 
 #define SCSI_TOC_LENGTH 20 // length for default CDROM TOC
 
