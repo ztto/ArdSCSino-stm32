@@ -138,7 +138,7 @@ inline byte readIO(void)
 // Read config file for per device settings
 void readSCSIDeviceConfig(uint8_t scsi_id, SCSI_DEVICE *dev) {
   SCSI_INQUIRY_DATA *iq = &dev->inquiry_block;
-  char section[6] = {'S', 'C', 'S', 'I', 0, 0};
+  char section[] = "SCSI0";
   FsFile config_file;
   char *buf = (char *)&m_scsi_buf;
 
@@ -447,9 +447,9 @@ void setup()
   // Image Set Select Init
   gpio_mode(IMAGE_SELECT1, GPIO_INPUT_PU);
   gpio_mode(IMAGE_SELECT2, GPIO_INPUT_PU);
-  pinMode(IMAGE_SELECT1, INPUT);
-  pinMode(IMAGE_SELECT2, INPUT);
-  int image_file_set = ((digitalRead(IMAGE_SELECT1) == LOW) ? 1 : 0) | ((digitalRead(IMAGE_SELECT2) == LOW) ? 2 : 0);
+  // pinMode(IMAGE_SELECT1, INPUT);
+  // pinMode(IMAGE_SELECT2, INPUT);
+  int image_file_set = (isLow(gpio_read(IMAGE_SELECT1)) ? 1 : 0) | (isLow(gpio_read(IMAGE_SELECT2)) ? 2 : 0);
 
   LED_OFF();
 
@@ -540,14 +540,15 @@ void setup()
   }
 
   if(SD.exists("scsi-config.txt")) {
-    LOG_FILE.println("scsi-config.txt is deprecated, use bluescsi.ini");
+    LOG_FILE.print("scsi-config.txt is deprecated, use ");
+    LOG_FILE.println(BLUESCSI_INI);
   }
 
   // Iterate over the root path in the SD card looking for candidate image files.
   FsFile root;
 
   char image_set_dir_name[] = "/ImageSetX/";
-  image_set_dir_name[9] = char(image_file_set) + 0x30;
+  image_set_dir_name[9] = INT_TO_CHAR(image_file_set);
   root.open(image_set_dir_name);
   if (root.isDirectory()) {
     LOG_FILE.print("Looking for images in: ");
@@ -594,10 +595,10 @@ void findDriveImages(FsFile root) {
     // Directories can not be opened RDWR, so it will fail, but fails the same way with no file/dir, so we need to peek at the file first.
     FsFile file_test = root.openNextFile(O_RDONLY);
     char name[MAX_FILE_PATH+1];
-    file_test.getName(name, MAX_FILE_PATH+1);
+    file_test.getName(name, sizeof(name));
 
     // Skip directories and already open files.
-    if(file_test.isDir() || strncmp(name, "LOG.txt", 7) == 0) {
+    if(file_test.isDir() || strncmp(name, LOG_FILENAME, (sizeof(LOG_FILENAME) - 1)) == 0) {
       file_test.close();
       continue;
     }
@@ -630,18 +631,18 @@ void findDriveImages(FsFile root) {
 
     if(file && file.isFile()) {
       // Defaults for Hard Disks
-      int id  = 1; // 0 and 3 are common in Macs for physical HD and CD, so avoid them.
-      int lun = 0;
-      int blk = 512;
+      int id  = DEFAULT_SCSI_ID; // 0 and 3 are common in Macs for physical HD and CD, so avoid them.
+      int lun = DEFAULT_SCSI_LUN;
+      int blk = HDD_BLOCK_SIZE;
 
       // Positionally read in and coerce the chars to integers.
       // We only require the minimum and read in the next if provided.
       int file_name_length = strlen(name);
-      if(file_name_length > 2) { // HD[N]
+      if(file_name_length > HDIMG_ID_POS) { // HD[N]
         int tmp_id = CHAR_TO_INT(name[HDIMG_ID_POS]);
 
         // If valid id, set it, else use default
-        if(tmp_id > -1 && tmp_id < 8) {
+        if(tmp_id > -1 && tmp_id <= MAX_SCSIID) {
           id = tmp_id;
         } else {
           LOG_FILE.print(name);
@@ -649,11 +650,11 @@ void findDriveImages(FsFile root) {
         }
       }
 
-      if(file_name_length > 3) { // HDN[N]
+      if(file_name_length > HDIMG_LUN_POS) { // HDN[N]
         int tmp_lun = CHAR_TO_INT(name[HDIMG_LUN_POS]);
 
         // If valid lun, set it, else use default
-        if(tmp_lun == 0 || tmp_lun == 1) {
+        if(tmp_lun > -1 && tmp_lun <= NUM_SCSILUN) {
           lun = tmp_lun;
         } else {
           LOG_FILE.print(name);
