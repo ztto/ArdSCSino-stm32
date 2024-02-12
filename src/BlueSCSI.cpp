@@ -653,7 +653,8 @@ void findDriveImages(FsFile root) {
         if(tmp_id > -1 && tmp_id <= MAX_SCSIID) {
           id = tmp_id;
         } else {
-          LOG_FILE.println("\t\tWARNING: Bad SCSI ID in filename, Using default ID 1");
+          LOG_FILE.print("\t\tWARNING: Bad SCSI ID in filename, Using default ID ");
+          LOG_FILE.println(id);
         }
       }
 
@@ -664,7 +665,8 @@ void findDriveImages(FsFile root) {
         if(tmp_lun > -1 && tmp_lun <= NUM_SCSILUN) {
           lun = tmp_lun;
         } else {
-          LOG_FILE.println("\t\tWARNING: Bad SCSI LUN in filename, Using default LUN ID 0");
+          LOG_FILE.print("\t\tWARNING: Bad SCSI LUN in filename, Using default LUN ID ");
+          LOG_FILE.println(lun);
         }
       }
 
