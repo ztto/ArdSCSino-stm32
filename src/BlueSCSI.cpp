@@ -199,8 +199,11 @@ void readSDCardInfo(int success_mhz)
 {
   cid_t sd_cid;
 
-  LOG_FILE.println("SDCard Info:");
-  LOG_FILE.print("\tFormat: ");
+  LOG_FILE.println("SD Card Info:");
+  LOG_FILE.print(" SPI Speed: ");
+  LOG_FILE.print(success_mhz);
+  LOG_FILE.println("MHz");
+  LOG_FILE.print(" Format: ");
   switch(SD.vol()->fatType()) {
     case FAT_TYPE_EXFAT:
       LOG_FILE.println("exFAT");
@@ -208,36 +211,28 @@ void readSDCardInfo(int success_mhz)
     default:
       LOG_FILE.println("FAT32/16/12 - exFAT may improve performance");
   }
-  LOG_FILE.print("\tSPI Speed: ");
-  LOG_FILE.print(success_mhz);
-  LOG_FILE.println("MHz");
-  LOG_FILE.print("\tMax Filename Length: ");
+  LOG_FILE.print(" Max Filename Length: ");
   LOG_FILE.println(MAX_FILE_PATH);
 
   if(SD.card()->readCID(&sd_cid))
   {
-    LOG_FILE.print("\tMID: ");
+    LOG_FILE.print(" MID: ");
     LOG_FILE.print(sd_cid.mid, 16);
     LOG_FILE.print(" OID: ");
-    LOG_FILE.print(sd_cid.oid[0]);
-    LOG_FILE.println(sd_cid.oid[1]);
+    LOG_FILE.print(sd_cid.oid[0]); LOG_FILE.println(sd_cid.oid[1]);
 
-    LOG_FILE.print("\tName: ");
-    LOG_FILE.print(sd_cid.pnm[0]);
-    LOG_FILE.print(sd_cid.pnm[1]);
-    LOG_FILE.print(sd_cid.pnm[2]);
-    LOG_FILE.print(sd_cid.pnm[3]);
-    LOG_FILE.print(sd_cid.pnm[4]);
+    LOG_FILE.print(" Name: ");
+    for (uint8_t i = 0; i < 5; i++) {
+      LOG_FILE.print(sd_cid.pnm[i]);
+    }
 
     LOG_FILE.print(" Date: ");
     LOG_FILE.print(sd_cid.mdtMonth());
     LOG_FILE.print("/");
     LOG_FILE.println(sd_cid.mdtYear());
 
-    LOG_FILE.print("\tSerial: ");
+    LOG_FILE.print(" Serial: ");
     LOG_FILE.println(sd_cid.psn());
-  } else {
-    LOG_FILE.println("\tWARNING: Unable to read SDCard CID data");
   }
   LOG_FILE.sync();
 }
@@ -276,13 +271,13 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
   dev->m_fileSize = dev->m_file.size();
 
   if(dev->m_fileSize < 1) {
-    LOG_FILE.println("\t\tERROR: File is 0 bytes");
+    LOG_FILE.println(" ERROR: 0 byte file");
     goto failed;
   }
 
   if(!dev->m_file.isContiguous())
   {
-    LOG_FILE.println("\t\tWARNING: File is fragmented, see https://github.com/erichelgeson/BlueSCSI/wiki/Image-File-Fragmentation");
+    LOG_FILE.println(" WARNING: Fragmented, see https://github.com/erichelgeson/BlueSCSI/wiki/Image-File-Fragmentation");
   }
 
   if(dev->m_type == SCSI_DEVICE_OPTICAL) {
@@ -308,7 +303,7 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
       // Last ditch effort
       // size must be less than 700MB
       if(dev->m_fileSize > 912579600) {
-        LOG_FILE.println("\t\tERROR: ISO too large!");
+        LOG_FILE.println(" ERROR: ISO too large!");
         goto failed;
       }
 
@@ -320,7 +315,7 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
         dev->m_rawblocksize = CDROM_COMMON_SECTORSIZE;
       } else {
         // I give up!
-        LOG_FILE.println("\t\tERROR: Invalid ISO!");
+        LOG_FILE.println(" ERROR: Invalid ISO!");
         goto failed;
       }
     }
@@ -328,7 +323,7 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
   dev->m_blockcount = dev->m_fileSize / dev->m_blocksize;
 
   // check blocksize dummy file
-  LOG_FILE.print("\t\tFile size: ");
+  LOG_FILE.print(" File size: ");
   LOG_FILE.print(dev->m_fileSize);
   LOG_FILE.print(" bytes, ");
   LOG_FILE.print(dev->m_fileSize / 1024);
@@ -538,15 +533,15 @@ void setup()
   // HD image file open
   scsi_id_mask = 0x00;
 
-  if(ini_getl("SCSI", "MapLunsToIDs", 0, BLUESCSI_INI))
-  {
-    LOG_FILE.println("IDs treated as LUNs for ID0");
-    ids_as_luns = true;
-  }
-
   if(SD.exists("scsi-config.txt")) {
     LOG_FILE.print("scsi-config.txt is deprecated, use ");
     LOG_FILE.println(BLUESCSI_INI);
+  }
+
+  if(ini_getl("SCSI", "MapLunsToIDs", 0, BLUESCSI_INI))
+  {
+    ids_as_luns = true;
+    LOG_FILE.println("Treating IDs as LUNs on ID0");
   }
 
   // Iterate over the root path in the SD card looking for candidate image files.
@@ -555,13 +550,13 @@ void setup()
   char image_set_dir_name[] = "/ImageSetX/";
   image_set_dir_name[9] = INT_TO_CHAR(image_file_set);
   root.open(image_set_dir_name);
+  LOG_FILE.print("Looking for images in: ");
   if (root.isDirectory()) {
-    LOG_FILE.print("Looking for images in: ");
     LOG_FILE.println(image_set_dir_name);
   } else {
     root.close();
     root.open("/");
-    LOG_FILE.println("Looking for images in: /");
+    LOG_FILE.println("/");
   }
 
   LOG_FILE.sync();
@@ -641,7 +636,7 @@ void findDriveImages(FsFile root) {
       int lun = DEFAULT_SCSI_LUN;
       int blk = HDD_BLOCK_SIZE;
 
-      LOG_FILE.print("\t- "); LOG_FILE.println(name);
+      LOG_FILE.print(" "); LOG_FILE.println(name);
 
       // Positionally read in and coerce the chars to integers.
       // We only require the minimum and read in the next if provided.
@@ -653,7 +648,7 @@ void findDriveImages(FsFile root) {
         if(tmp_id > -1 && tmp_id <= MAX_SCSIID) {
           id = tmp_id;
         } else {
-          LOG_FILE.print("\t\tWARNING: Bad SCSI ID in filename, Using default ID ");
+          LOG_FILE.print(" WARNING: Bad SCSI ID in filename, using ID ");
           LOG_FILE.println(id);
         }
       }
@@ -665,7 +660,7 @@ void findDriveImages(FsFile root) {
         if(tmp_lun > -1 && tmp_lun <= NUM_SCSILUN) {
           lun = tmp_lun;
         } else {
-          LOG_FILE.print("\t\tWARNING: Bad SCSI LUN in filename, Using default LUN ID ");
+          LOG_FILE.print(" WARNING: Bad SCSI LUN in filename, using LUN ");
           LOG_FILE.println(lun);
         }
       }
@@ -686,11 +681,17 @@ void findDriveImages(FsFile root) {
         blk  = 2048;
       }
 
-      LOG_FILE.print("\t\tParsed: ");
-      if(device_type == SCSI_DEVICE_OPTICAL) {
-        LOG_FILE.print("CDROM");
-      } else {
-        LOG_FILE.print("HDD");
+      LOG_FILE.print(" Parsed: ");
+      switch(device_type)
+      {
+        case SCSI_DEVICE_HDD:
+          LOG_FILE.print("HDD");
+          break;
+        case SCSI_DEVICE_OPTICAL:
+          LOG_FILE.print("CDROM");
+          break;
+        default:
+          LOG_FILE.print("UNKNOWN");
       }
       LOG_FILE.print(" ID "); LOG_FILE.print(id);
       LOG_FILE.print(" LUN "); LOG_FILE.print(lun);
@@ -715,6 +716,7 @@ void findDriveImages(FsFile root) {
             break;
         }
       }
+      LOG_FILE.println();
     }
     LOG_FILE.sync();
   }
@@ -730,8 +732,8 @@ void initFileLog() {
   LOG_FILE.println("BlueSCSI https://github.com/erichelgeson/BlueSCSI");
   LOG_FILE.print("VER: ");
   LOG_FILE.print(VERSION);
-  LOG_FILE.println(BUILD_TAGS);
-  LOG_FILE.print("DEBUG: ");
+  LOG_FILE.print(BUILD_TAGS);
+  LOG_FILE.print(" DEBUG: ");
   LOG_FILE.println(DEBUG);
   LOG_FILE.sync();
 }
