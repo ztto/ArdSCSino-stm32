@@ -182,7 +182,7 @@ enum SCSI_DEVICE_TYPE
 |  1 | 1 | 1  |  MESSAGE IN   |       Initiator from target   /  |  phase     |
 |-----------------------------------------------------------------------------|
 | Key:  0 = False,  1 = True,  * = Reserved for future standardization        |
-+=============================================================================+ 
++=============================================================================+
 */
 // SCSI phase change as single write to port B
 #define SCSIPHASEMASK(MSGACTIVE, CDACTIVE, IOACTIVE) ((BITMASK(vMSG)<<((MSGACTIVE)?16:0)) | (BITMASK(vCD)<<((CDACTIVE)?16:0)) | (BITMASK(vIO)<<((IOACTIVE)?16:0)))
@@ -340,15 +340,15 @@ typedef struct _SCSI_INQUIRY_DATA
 // HDD image
 typedef __attribute__((aligned(4))) struct _SCSI_DEVICE
 {
-	FsFile        m_file;                  // File object
-	uint64_t      m_fileSize;               // File size
-	uint16_t      m_blocksize;              // SCSI BLOCK size
+  FsFile        m_file;                   // File object
+  uint64_t      m_fileSize;               // File size
+  uint16_t      m_blocksize;              // SCSI BLOCK size
   uint16_t      m_rawblocksize;           // OPTICAL raw sector size
   uint8_t       m_type;                   // SCSI device type
   uint32_t      m_blockcount;             // blockcount
-  SCSI_INQUIRY_DATA inquiry_block;       // SCSI information
+  SCSI_INQUIRY_DATA inquiry_block;        // SCSI information
   uint8_t       m_senseKey;               // Sense key
-  uint16_t      m_additional_sense_code;  // ASC/ASCQ 
+  uint16_t      m_additional_sense_code;  // ASC/ASCQ
   uint8_t       m_sector_offset;          // optical sector offset for missing sync header
   uint8_t       flags;                    // various device flags
 } SCSI_DEVICE;

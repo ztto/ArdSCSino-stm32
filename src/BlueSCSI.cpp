@@ -339,7 +339,6 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
   return true; // File opened
 
 failed:
-
   dev->m_file.close();
   dev->m_fileSize = dev->m_blocksize = 0; // no file
   //delete dev->m_file;
@@ -463,12 +462,12 @@ void setup()
   TRANSCEIVER_IO_SET(vTR_INITIATOR,TR_INPUT);
 #endif
 
-  //GPIO(SCSI BUS)Initialization
-  //Port setting register (lower)
-//  GPIOB->regs->CRL |= 0x000000008; // SET INPUT W/ PUPD on PAB-PB0
-  //Port setting register (upper)
-  //GPIOB->regs->CRH = 0x88888888; // SET INPUT W/ PUPD on PB15-PB8
-//  GPIOB->regs->ODR = 0x0000FF00; // SET PULL-UPs on PB15-PB8
+  // GPIO(SCSI BUS)Initialization
+  // Port setting register (lower)
+  // GPIOB->regs->CRL |= 0x000000008; // SET INPUT W/ PUPD on PAB-PB0
+  // Port setting register (upper)
+  // GPIOB->regs->CRH = 0x88888888; // SET INPUT W/ PUPD on PB15-PB8
+  // GPIOB->regs->ODR = 0x0000FF00; // SET PULL-UPs on PB15-PB8
   // DB and DP are input modes
   SCSI_DB_INPUT()
 
@@ -635,7 +634,7 @@ void findDriveImages(FsFile root) {
       int lun = 0;
       int blk = 512;
 
-      // Positionally read in and coerase the chars to integers.
+      // Positionally read in and coerce the chars to integers.
       // We only require the minimum and read in the next if provided.
       int file_name_length = strlen(name);
       if(file_name_length > 2) { // HD[N]
