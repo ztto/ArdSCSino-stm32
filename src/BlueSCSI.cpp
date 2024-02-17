@@ -116,7 +116,7 @@ SCSI_COMMAND_HANDLER(onSendFileEnd);
 static void flashError(const unsigned error);
 void onBusReset(void);
 void initFileLog(void);
-void finalizeFileLog(void);
+void finalizeDevices(void);
 void findDriveImages(FsFile root);
 
 /*
@@ -583,7 +583,7 @@ void setup()
     flashError(ERROR_FALSE_INIT);
   }
 
-  finalizeFileLog();
+  finalizeDevices();
 
   // Occurs when the RST pin state changes from HIGH to LOW
   attachInterrupt(RST, onBusReset, FALLING);
@@ -712,8 +712,6 @@ void findDriveImages(FsFile root) {
             dev->inquiry_block = default_optical;
             break;
         }
-
-        readSCSIDeviceConfig(id, dev);
       }
     }
     LOG_FILE.sync();
@@ -737,34 +735,34 @@ void initFileLog() {
 }
 
 /*
- * Finalize initialization logfile
+ * Check INI file for device overrides and print summary to logfile
  */
-void finalizeFileLog() {
+void finalizeDevices() {
   // View support drive map
-  LOG_FILE.print("ID");
-  for(int lun=0;lun<NUM_SCSILUN;lun++)
-  {
-    LOG_FILE.print(":LUN");
-    LOG_FILE.print(lun);
-  }
-  LOG_FILE.println(":");
-  //
+  LOG_FILE.println("SCSI Devices");
+  LOG_FILE.println("ID\tLUN\tName");
+
   for(int id=0;id<NUM_SCSIID;id++)
   {
-    LOG_FILE.print(" ");
-    LOG_FILE.print(id);
     for(int lun=0;lun<NUM_SCSILUN;lun++)
     {
+      LOG_FILE.print(id);
+      LOG_FILE.print("\t");
+      LOG_FILE.print(lun);
+      LOG_FILE.print("\t");
       SCSI_DEVICE *dev = &scsi_device_list[id][lun];
-      if( (lun<NUM_SCSILUN) && (dev->m_file))
+      if(dev->m_file)
       {
-        LOG_FILE.print((dev->m_blocksize<1000) ? ": " : ":");
-        LOG_FILE.print(dev->m_blocksize);
+        char name[MAX_FILE_PATH+1];
+        dev->m_file.getName(name, sizeof(name));
+        LOG_FILE.print(name);
+        readSCSIDeviceConfig(id, dev);
       }
       else
-        LOG_FILE.print(":----");
+        LOG_FILE.print("-");
+
+      LOG_FILE.println();
     }
-    LOG_FILE.println(":");
   }
   LOG_FILE.println("Finished configuration - Starting BlueSCSI");
   LOG_FILE.sync();
